@@ -166,6 +166,84 @@ Implement RBAC policies and security measures to ensure the operator has the nec
 Plan and implement backup and recovery strategies for Wazuh data to ensure data integrity and availability.
 
 ## Full example
+CRD for Custom PVC
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: custompvcs.yourdomain.com
+spec:
+  group: yourdomain.com
+  names:
+    kind: CustomPVC
+    listKind: CustomPVCList
+    plural: custompvcs
+    singular: custompvc
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                accessModes:
+                  type: array
+                  items:
+                    type: string
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        storage:
+                          type: string
+```
+
+CRD for Custom Config
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: customconfigs.yourdomain.com
+spec:
+  group: yourdomain.com
+  names:
+    kind: CustomConfig
+    listKind: CustomConfigList
+    plural: customconfigs
+    singular: customconfig
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                configData:
+                  type: string
+```
+
+Operator Logic in Rust
+```toml
+[dependencies]
+kube = { version = "0.58.0", features = ["runtime"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+```
+
+Main
 ```rust
 use kube::api::{Api, PostParams};
 use kube::Client;
