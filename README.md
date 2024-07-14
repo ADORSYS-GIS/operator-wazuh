@@ -96,47 +96,6 @@ Implement the reconciliation loop to:
 1. Watch for changes in the CRDs.
 2. Deploy/update Helm releases based on the CRD specifications.
 
-### Example Reconciliation Code
-
-```go
-package controllers
-
-import (
-    "context"
-    helmv2 "github.com/operator-framework/helm-operator-plugins/pkg/helm/v2"
-    wazuhv1 "your-operator/api/v1"
-    "sigs.k8s.io/controller-runtime/pkg/client"
-)
-
-type WazuhClusterReconciler struct {
-    client.Client
-    HelmChart helmv2.HelmChart
-}
-
-func (r *WazuhClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-    var wazuhCluster wazuhv1.WazuhCluster
-    if err := r.Get(ctx, req.NamespacedName, &wazuhCluster); err != nil {
-        return ctrl.Result{}, client.IgnoreNotFound(err)
-    }
-
-    // Reconcile Helm release for Wazuh master
-    _, err := r.HelmChart.ReconcileRelease(ctx, req.NamespacedName, wazuhCluster.Spec.Master)
-    if err != nil {
-        return ctrl.Result{}, err
-    }
-
-    // Similar logic for other components
-
-    return ctrl.Result{}, nil
-}
-
-func (r *WazuhClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-    return ctrl.NewControllerManagedBy(mgr).
-        For(&wazuhv1.WazuhCluster{}).
-        Complete(r)
-}
-```
-
 ## Volume and ConfigMap Management
 
 ### PVC and ConfigMap Creation
@@ -205,6 +164,103 @@ Implement RBAC policies and security measures to ensure the operator has the nec
 ### Backup and Recovery
 
 Plan and implement backup and recovery strategies for Wazuh data to ensure data integrity and availability.
+
+## Full example
+```rust
+use kube::api::{Api, PostParams};
+use kube::Client;
+use kube::CustomResource;
+use kube_runtime::controller::{Context, Controller, ReconcilerAction};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::time::Duration;
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug)]
+#[kube(group = "yourdomain.com", version = "v1", kind = "CustomPVC", namespaced)]
+struct CustomPVCSpec {
+    access_modes: Vec<String>,
+    resources: ResourceRequirements,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+struct ResourceRequirements {
+    requests: StorageRequests,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+struct StorageRequests {
+    storage: String,
+}
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug)]
+#[kube(group = "yourdomain.com", version = "v1", kind = "CustomConfig", namespaced)]
+struct CustomConfigSpec {
+    config_data: String,
+}
+
+async fn reconcile_pvc(pvc: Arc<CustomPVC>, ctx: Context<Data>) -> Result<ReconcilerAction, kube::Error> {
+    // Here you can add the logic to handle PVC creation, update, or deletion
+    // Example: Create a PersistentVolumeClaim based on the CustomPVC
+    Ok(ReconcilerAction {
+        requeue_after: Some(Duration::from_secs(300)),
+    })
+}
+
+async fn reconcile_config(config: Arc<CustomConfig>, ctx: Context<Data>) -> Result<ReconcilerAction, kube::Error> {
+    // Here you can add the logic to handle Config creation, update, or deletion
+    // Example: Create a ConfigMap based on the CustomConfig
+    Ok(ReconcilerAction {
+        requeue_after: Some(Duration::from_secs(300)),
+    })
+}
+
+struct Data {
+    client: Client,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::try_default().await?;
+    let pvcs = Api::<CustomPVC>::all(client.clone());
+    let configs = Api::<CustomConfig>::all(client.clone());
+
+    let context = Context::new(Data { client: client.clone() });
+
+    Controller::new(pvcs, Default::default())
+        .run(reconcile_pvc, error_policy, context.clone())
+        .for_each(|res| async move {
+            match res {
+                Ok(o) => println!("reconciled {:?}", o),
+                Err(e) => eprintln!("reconcile failed: {:?}", e),
+            }
+        })
+        .await;
+
+    Controller::new(configs, Default::default())
+        .run(reconcile_config, error_policy, context)
+        .for_each(|res| async move {
+            match res {
+                Ok(o) => println!("reconciled {:?}", o),
+                Err(e) => eprintln!("reconcile failed: {:?}", e),
+            }
+        })
+        .await;
+
+    Ok(())
+}
+
+fn error_policy(_object: Arc<CustomPVC>, _error: &kube::Error, _ctx: Context<Data>) -> ReconcilerAction {
+    ReconcilerAction {
+        requeue_after: Some(Duration::from_secs(60)),
+    }
+}
+
+fn error_policy(_object: Arc<CustomConfig>, _error: &kube::Error, _ctx: Context<Data>) -> ReconcilerAction {
+    ReconcilerAction {
+        requeue_after: Some(Duration::from_secs(60)),
+    }
+}
+```
 
 ## Conclusion
 
