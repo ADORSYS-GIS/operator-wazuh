@@ -22,10 +22,10 @@ This project aims to develop a Kubernetes operator for managing the deployment o
 ### Team Roles
 
 - **Team Lead**: Oversees the project, ensures deadlines are met, and coordinates tasks.
-- **Developer 1**: Focuses on CRD and API development.
-- **Developer 2**: Handles operator logic and Helm integration.
-- **Developer 3**: Manages volume and ConfigMap creation.
-- **Developer 4**: Develops testing strategies and documentation.
+- **DevOps**: Focuses on CRD and API development.
+- **Developer**: Handles operator logic and Helm integration.
+- **DevOps**: Manages volume and ConfigMap creation.
+- **Tester**: Develops testing strategies and documentation.
 
 ## Development Environment Setup
 
