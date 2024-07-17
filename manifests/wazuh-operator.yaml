@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wazuh-operator
+  namespace: wazuh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wazuh-operator
+  template:
+    metadata:
+      labels:
+        app: wazuh-operator
+    spec:
+      containers:
+        - name: wazuh-operator
+          image: TODO
+          env:
+            - name: RUST_LOG
+              value: info
