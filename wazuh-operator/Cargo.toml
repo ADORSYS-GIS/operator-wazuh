@@ -5,15 +5,13 @@ edition = "2021"
 
 [dependencies]
 kube = { version = "0.92.1", features = ["runtime", "derive", "admission", "rustls-tls", "ws", "socks5", "runtime"] }
+schemars = "0.8.21"
 k8s-openapi = { version = "0.22.0", features = ["latest"] }
 tokio = { version = "1.38.1", features = ["full"] }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = { version = "1.0.120" }
-serde_yaml = { version = "0.9.33" }
 futures = "0.3.30"
 anyhow = { version = "1.0.86" }
-logger = "0.4.0"
 thiserror = { version = "1.0.62" }
-schemars = "0.8.21"
 log = "0.4.22"
 env_logger = "0.11.3"

@@ -21,6 +21,10 @@ pub async fn watch_wazuh_cluster(client: Client) {
     async fn reconcile(_wazuh: Arc<WazuhCluster>, _ctx: Arc<Data>) -> Result<Action, kube::Error> {
         info!("Reconciling WazuhCluster");
 
+        let patch = json!({"spec": {
+            "activeDeadlineSeconds": 5
+        }});
+
         // Implement your reconciliation logic here
         Ok(Action::requeue(Duration::from_secs(300)))
     }
