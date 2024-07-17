@@ -1,0 +1,1 @@
+pub mod wazuh_cluster;
