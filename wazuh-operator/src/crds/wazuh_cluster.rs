@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 
 #[derive(CustomResource, Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[kube(group = "wazuh.adorsys.team", version = "v1", kind = "WazuhCluster", namespaced)]
+#[kube(shortname = "wzcl", group = "wazuh.adorsys.team", version = "v1", kind = "WazuhCluster", namespaced)]
 pub struct WazuhClusterSpec {
     pub replicas: i32,
 }
