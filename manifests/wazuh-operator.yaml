@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: wazuh-operator
-          image: TODO
+          image: ghcr.io/adorsys-gis/wazuh-operator:latest
           env:
             - name: RUST_LOG
               value: info
