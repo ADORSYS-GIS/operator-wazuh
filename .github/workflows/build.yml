@@ -8,6 +8,7 @@ on:
       - 'v*'
     paths:
       - 'wazuh-operator/**'
+      - '.github/workflows/build.yml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,6 +26,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        name: Checkout repository
 
       - name: Build Translator
         working-directory: wazuh-operator
