@@ -2,7 +2,7 @@ use kube::Client;
 
 #[derive(Clone)]
 pub struct Data {
-    client: Client
+    pub(crate) client: Client
 }
 
 impl Data {

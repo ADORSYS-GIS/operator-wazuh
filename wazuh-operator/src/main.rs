@@ -13,6 +13,7 @@ mod crds;
 mod models;
 mod controller;
 mod errors;
+mod services;
 
 #[tokio::main]
 async fn main() -> Result<()> {

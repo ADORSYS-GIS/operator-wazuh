@@ -1,10 +1,14 @@
-use thiserror::Error;
-
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Failed to create WazuhCluster: {0}")]
-    WazuhClusterCreationFailed(#[source] kube::Error),
+    #[error("App reported error: {source}")]
+    AnyError {
+        #[from]
+        source: anyhow::Error,
+    },
 
-    #[error("MissingObjectKey: {0}")]
-    MissingObjectKey(&'static str),
+    #[error("Kubernetes reported error: {source}")]
+    KubeError {
+        #[from]
+        source: kube::Error,
+    },
 }
