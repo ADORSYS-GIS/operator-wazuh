@@ -2,14 +2,16 @@
 
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
-    Container, PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, Service,
+    ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
+    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, Service,
     ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, LabelSelector, OwnerReference};
 use kube::ResourceExt;
-use kube::api::{Api, Patch, PatchParams, PostParams, Resource};
+use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -37,6 +39,26 @@ pub async fn reconcile(
     let ns = indexer
         .namespace()
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+    let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(ctx.client.clone(), &ns);
+
+    finalizer(&indexer_api, "wazuh.com/finalizer", indexer, |event| {
+        let ctx = ctx.clone();
+        async move {
+            match event {
+                FinalizerEvent::Apply(indexer) => reconcile_indexer(indexer, ctx).await,
+                FinalizerEvent::Cleanup(indexer) => cleanup_indexer(indexer, ctx).await,
+            }
+        }
+    })
+    .await
+    .map_err(|e| Error::ReconciliationError(e.to_string()))
+}
+
+async fn reconcile_indexer(
+    indexer: Arc<WazuhIndexerCluster>,
+    ctx: Arc<IndexerContext>,
+) -> Result<Action> {
+    let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
 
     info!("Reconciling WazuhIndexerCluster: {}/{}", ns, name);
@@ -44,10 +66,30 @@ pub async fn reconcile(
     let client = ctx.client.clone();
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
+    let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
 
-    let sts = generate_statefulset(&indexer)?;
+    // 1. Generate and Apply ConfigMap
+    let cm = generate_configmap(&indexer)?;
+    cm_api
+        .patch(
+            &format!("{}-config", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&cm),
+        )
+        .await?;
+
+    // 2. Generate and Apply Headless Service
+    let headless_svc = generate_headless_service(&indexer)?;
+    svc_api
+        .patch(
+            &format!("{}-headless", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&headless_svc),
+        )
+        .await?;
+
+    // 3. Generate and Apply Client Service
     let svc = generate_service(&indexer)?;
-
     svc_api
         .patch(
             &name,
@@ -56,6 +98,8 @@ pub async fn reconcile(
         )
         .await?;
 
+    // 4. Generate and Apply StatefulSet
+    let sts = generate_statefulset(&indexer)?;
     sts_api
         .patch(
             &name,
@@ -72,6 +116,21 @@ pub async fn reconcile(
     );
 
     Ok(Action::requeue(Duration::from_secs(300)))
+}
+
+async fn cleanup_indexer(
+    indexer: Arc<WazuhIndexerCluster>,
+    _ctx: Arc<IndexerContext>,
+) -> Result<Action> {
+    let ns = indexer.namespace().unwrap();
+    let name = indexer.name_any();
+    info!("Cleaning up WazuhIndexerCluster: {}/{}", ns, name);
+
+    // K8s garbage collection handles owned resources (StatefulSet, Service, ConfigMap)
+    // because we set owner references.
+    // If we had external resources (e.g. cloud LB, external DB), we would clean them here.
+
+    Ok(Action::await_change())
 }
 
 async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<bool> {
@@ -131,6 +190,82 @@ async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> R
     Ok(())
 }
 
+fn generate_configmap(indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
+    let name = indexer.name_any();
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-indexer".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+
+    let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+
+    let mut data = BTreeMap::new();
+    data.insert(
+        "opensearch.yml".to_string(),
+        format!(
+            r#"cluster.name: {}
+network.host: 0.0.0.0
+bootstrap.memory_lock: true
+discovery.seed_hosts: ["{}-headless"]
+cluster.initial_master_nodes: [{}]
+plugins.security.disabled: true
+"#,
+            name,
+            name,
+            (0..indexer.spec.replicas)
+                .map(|i| format!("{}-{}", name, i))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    );
+
+    Ok(ConfigMap {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-config", name)),
+            labels: Some(labels),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        data: Some(data),
+        ..Default::default()
+    })
+}
+
+fn generate_headless_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
+    let name = indexer.name_any();
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-indexer".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+
+    let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+
+    Ok(Service {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-headless", name)),
+            labels: Some(labels.clone()),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        spec: Some(ServiceSpec {
+            cluster_ip: Some("None".to_string()),
+            selector: Some(labels),
+            ports: Some(vec![
+                ServicePort {
+                    name: Some("http".to_string()),
+                    port: 9200,
+                    ..Default::default()
+                },
+                ServicePort {
+                    name: Some("transport".to_string()),
+                    port: 9300,
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
 fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
     let name = indexer.name_any();
     let mut labels = BTreeMap::new();
@@ -152,11 +287,6 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
                 ServicePort {
                     name: Some("http".to_string()),
                     port: 9200,
-                    ..Default::default()
-                },
-                ServicePort {
-                    name: Some("transport".to_string()),
-                    port: 9300,
                     ..Default::default()
                 },
             ]),
@@ -200,48 +330,59 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                     containers: vec![Container {
                         name: "indexer".to_string(),
                         image: Some(format!("wazuh/wazuh-indexer:{}", indexer.spec.version)),
-                        env: Some(vec![
-                            k8s_openapi::api::core::v1::EnvVar {
-                                name: "cluster.name".to_string(),
-                                value: Some(name.clone()),
+                        ports: Some(vec![
+                            ContainerPort {
+                                name: Some("http".to_string()),
+                                container_port: 9200,
                                 ..Default::default()
                             },
-                            k8s_openapi::api::core::v1::EnvVar {
+                            ContainerPort {
+                                name: Some("transport".to_string()),
+                                container_port: 9300,
+                                ..Default::default()
+                            },
+                        ]),
+                        env: Some(vec![
+                            EnvVar {
                                 name: "node.name".to_string(),
-                                value_from: Some(k8s_openapi::api::core::v1::EnvVarSource {
-                                    field_ref: Some(
-                                        k8s_openapi::api::core::v1::ObjectFieldSelector {
-                                            field_path: "metadata.name".to_string(),
-                                            ..Default::default()
-                                        },
-                                    ),
+                                value_from: Some(EnvVarSource {
+                                    field_ref: Some(ObjectFieldSelector {
+                                        field_path: "metadata.name".to_string(),
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
                                 }),
                                 ..Default::default()
                             },
-                            k8s_openapi::api::core::v1::EnvVar {
-                                name: "discovery.seed_hosts".to_string(),
-                                value: Some(format!("{}-headless", name)),
-                                ..Default::default()
-                            },
-                            k8s_openapi::api::core::v1::EnvVar {
-                                name: "cluster.initial_master_nodes".to_string(),
-                                value: Some(
-                                    (0..indexer.spec.replicas)
-                                        .map(|i| format!("{}-{}", name, i))
-                                        .collect::<Vec<_>>()
-                                        .join(","),
-                                ),
+                            EnvVar {
+                                name: "OPENSEARCH_JAVA_OPTS".to_string(),
+                                value: Some("-Xms512m -Xmx512m".to_string()),
                                 ..Default::default()
                             },
                         ]),
-                        volume_mounts: Some(vec![VolumeMount {
-                            name: "indexer-data".to_string(),
-                            mount_path: "/var/lib/wazuh-indexer".to_string(),
-                            ..Default::default()
-                        }]),
+                        volume_mounts: Some(vec![
+                            VolumeMount {
+                                name: "indexer-data".to_string(),
+                                mount_path: "/usr/share/opensearch/data".to_string(),
+                                ..Default::default()
+                            },
+                            VolumeMount {
+                                name: "config".to_string(),
+                                mount_path: "/usr/share/opensearch/config/opensearch.yml".to_string(),
+                                sub_path: Some("opensearch.yml".to_string()),
+                                ..Default::default()
+                            },
+                        ]),
                         ..Default::default()
                     }],
+                    volumes: Some(vec![k8s_openapi::api::core::v1::Volume {
+                        name: "config".to_string(),
+                        config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                            name: format!("{}-config", name),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
                     ..Default::default()
                 }),
             },

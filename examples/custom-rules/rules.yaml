@@ -2,7 +2,7 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhRule
 metadata:
   name: custom-ssh-rule
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   clusterName: wazuh-manager
   rule: |
@@ -18,7 +18,7 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhDecoder
 metadata:
   name: custom-ssh-decoder
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   clusterName: wazuh-manager
   decoder: |

@@ -4,13 +4,14 @@ use crate::error::{Error, Result};
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, PodSpec, PodTemplateSpec, Secret, Service, ServicePort, ServiceSpec,
-    Volume, VolumeMount,
+    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Secret, Service, ServicePort,
+    ServiceSpec, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
 use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -35,6 +36,26 @@ pub async fn reconcile(
     let ns = dashboard
         .namespace()
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+    let dashboard_api: Api<WazuhDashboard> = Api::namespaced(ctx.client.clone(), &ns);
+
+    finalizer(&dashboard_api, "wazuh.com/finalizer", dashboard, |event| {
+        let ctx = ctx.clone();
+        async move {
+            match event {
+                FinalizerEvent::Apply(dashboard) => reconcile_dashboard(dashboard, ctx).await,
+                FinalizerEvent::Cleanup(dashboard) => cleanup_dashboard(dashboard, ctx).await,
+            }
+        }
+    })
+    .await
+    .map_err(|e| Error::ReconciliationError(e.to_string()))
+}
+
+async fn reconcile_dashboard(
+    dashboard: Arc<WazuhDashboard>,
+    ctx: Arc<DashboardContext>,
+) -> Result<Action> {
+    let ns = dashboard.namespace().unwrap();
     let name = dashboard.name_any();
 
     info!("Reconciling WazuhDashboard: {}/{}", ns, name);
@@ -133,7 +154,7 @@ pub async fn reconcile(
 
     // 5. Create Deployment
     let deploy_api: Api<Deployment> = Api::namespaced(client.clone(), &ns);
-    let deploy = generate_dashboard_deployment(&dashboard)?;
+    let deploy = generate_dashboard_deployment(&dashboard, &indexer)?;
 
     deploy_api
         .patch(
@@ -170,6 +191,17 @@ pub async fn reconcile(
     update_dashboard_status(&dashboard, client).await?;
 
     Ok(Action::requeue(Duration::from_secs(300)))
+}
+
+async fn cleanup_dashboard(
+    dashboard: Arc<WazuhDashboard>,
+    _ctx: Arc<DashboardContext>,
+) -> Result<Action> {
+    let ns = dashboard.namespace().unwrap();
+    let name = dashboard.name_any();
+    info!("Cleaning up WazuhDashboard: {}/{}", ns, name);
+
+    Ok(Action::await_change())
 }
 
 async fn update_dashboard_status(dashboard: &WazuhDashboard, client: kube::Client) -> Result<()> {
@@ -245,7 +277,10 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
     })
 }
 
-fn generate_dashboard_deployment(dashboard: &WazuhDashboard) -> Result<Deployment> {
+fn generate_dashboard_deployment(
+    dashboard: &WazuhDashboard,
+    indexer: &WazuhIndexerCluster,
+) -> Result<Deployment> {
     let name = dashboard.name_any();
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-dashboard".to_string());
@@ -275,6 +310,27 @@ fn generate_dashboard_deployment(dashboard: &WazuhDashboard) -> Result<Deploymen
                     containers: vec![Container {
                         name: "dashboard".to_string(),
                         image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
+                        env: Some(vec![
+                            EnvVar {
+                                name: "INDEXER_URL".to_string(),
+                                value: Some(format!(
+                                    "https://{}.{}.svc.cluster.local:9200",
+                                    indexer.name_any(),
+                                    indexer.namespace().unwrap()
+                                )),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "INDEXER_USER".to_string(),
+                                value: Some("admin".to_string()),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "INDEXER_PASSWORD".to_string(),
+                                value: Some("admin".to_string()),
+                                ..Default::default()
+                            },
+                        ]),
                         volume_mounts: Some(vec![
                             VolumeMount {
                                 name: "config".to_string(),

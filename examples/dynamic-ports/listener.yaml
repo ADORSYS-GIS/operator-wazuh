@@ -2,7 +2,7 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhListener
 metadata:
   name: custom-syslog-listener
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   clusterName: wazuh-manager
   port: 514

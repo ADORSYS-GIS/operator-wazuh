@@ -4,13 +4,14 @@ use crate::error::{Error, Result};
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, PodSpec, PodTemplateSpec, Secret, Service, ServicePort, ServiceSpec,
-    VolumeMount,
+    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Secret, Service, ServicePort,
+    ServiceSpec, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
 use operator_crds::{WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -35,6 +36,26 @@ pub async fn reconcile(
     let ns = manager
         .namespace()
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+    let manager_api: Api<WazuhManagerCluster> = Api::namespaced(ctx.client.clone(), &ns);
+
+    finalizer(&manager_api, "wazuh.com/finalizer", manager, |event| {
+        let ctx = ctx.clone();
+        async move {
+            match event {
+                FinalizerEvent::Apply(manager) => reconcile_manager(manager, ctx).await,
+                FinalizerEvent::Cleanup(manager) => cleanup_manager(manager, ctx).await,
+            }
+        }
+    })
+    .await
+    .map_err(|e| Error::ReconciliationError(e.to_string()))
+}
+
+async fn reconcile_manager(
+    manager: Arc<WazuhManagerCluster>,
+    ctx: Arc<ManagerContext>,
+) -> Result<Action> {
+    let ns = manager.namespace().unwrap();
     let name = manager.name_any();
 
     info!("Reconciling WazuhManagerCluster: {}/{}", ns, name);
@@ -98,9 +119,21 @@ pub async fn reconcile(
 
     info!("Successfully reconciled Service for {}", name);
 
-    // 5. Create StatefulSet
+    // 5. Create Headless Service
+    let headless_svc = generate_manager_headless_service(&manager)?;
+    svc_api
+        .patch(
+            &format!("{}-headless", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&headless_svc),
+        )
+        .await?;
+
+    info!("Successfully reconciled Headless Service for {}", name);
+
+    // 6. Create StatefulSet
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
-    let sts = generate_manager_statefulset(&manager)?;
+    let sts = generate_manager_statefulset(&manager, &indexer)?;
 
     sts_api
         .patch(
@@ -112,10 +145,21 @@ pub async fn reconcile(
 
     info!("Successfully reconciled StatefulSet for {}", name);
 
-    // 6. Update status
+    // 7. Update status
     update_manager_status(&manager, client).await?;
 
     Ok(Action::requeue(Duration::from_secs(300)))
+}
+
+async fn cleanup_manager(
+    manager: Arc<WazuhManagerCluster>,
+    _ctx: Arc<ManagerContext>,
+) -> Result<Action> {
+    let ns = manager.namespace().unwrap();
+    let name = manager.name_any();
+    info!("Cleaning up WazuhManagerCluster: {}/{}", ns, name);
+
+    Ok(Action::await_change())
 }
 
 async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Client) -> Result<()> {
@@ -159,7 +203,10 @@ async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Clie
     Ok(())
 }
 
-fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<StatefulSet> {
+fn generate_manager_statefulset(
+    manager: &WazuhManagerCluster,
+    indexer: &WazuhIndexerCluster,
+) -> Result<StatefulSet> {
     let name = manager.name_any();
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
@@ -180,7 +227,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                 match_labels: Some(labels.clone()),
                 ..Default::default()
             },
-            service_name: Some(name.clone()),
+            service_name: Some(format!("{}-headless", name)),
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
@@ -198,6 +245,27 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                     containers: vec![Container {
                         name: "manager".to_string(),
                         image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
+                        env: Some(vec![
+                            EnvVar {
+                                name: "INDEXER_URL".to_string(),
+                                value: Some(format!(
+                                    "https://{}.{}.svc.cluster.local:9200",
+                                    indexer.name_any(),
+                                    indexer.namespace().unwrap()
+                                )),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "INDEXER_USER".to_string(),
+                                value: Some("admin".to_string()),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "INDEXER_PASSWORD".to_string(),
+                                value: Some("admin".to_string()),
+                                ..Default::default()
+                            },
+                        ]),
                         volume_mounts: Some(vec![
                             VolumeMount {
                                 name: "config".to_string(),
@@ -312,6 +380,35 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
                 },
             ]),
             type_: Some("ClusterIP".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+fn generate_manager_headless_service(manager: &WazuhManagerCluster) -> Result<Service> {
+    let name = manager.name_any();
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+
+    let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+
+    Ok(Service {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-headless", name)),
+            labels: Some(labels.clone()),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        spec: Some(ServiceSpec {
+            cluster_ip: Some("None".to_string()),
+            selector: Some(labels),
+            ports: Some(vec![ServicePort {
+                name: Some("cluster".to_string()),
+                port: 1516,
+                ..Default::default()
+            }]),
             ..Default::default()
         }),
         ..Default::default()

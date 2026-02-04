@@ -2,22 +2,33 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhIndexerCluster
 metadata:
   name: wazuh-indexer
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   replicas: 1
+  version: "4.14.0"
+  storage:
+    size: "1Gi"
 ---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
 metadata:
   name: wazuh-manager
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   replicas: 1
+  version: "4.14.0"
+  indexer_cluster:
+    name: wazuh-indexer
 ---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhDashboard
 metadata:
   name: wazuh-dashboard
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   replicas: 1
+  version: "4.14.0"
+  indexer_cluster:
+    name: wazuh-indexer
+  service:
+    service_type: ClusterIP

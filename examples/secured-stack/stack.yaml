@@ -2,7 +2,7 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhIndexerCluster
 metadata:
   name: wazuh-indexer-secured
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   replicas: 3
   security:
@@ -14,7 +14,7 @@ apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
 metadata:
   name: wazuh-manager-secured
-  namespace: wazuh-system
+  namespace: wazuh-test
 spec:
   replicas: 2
   security:
