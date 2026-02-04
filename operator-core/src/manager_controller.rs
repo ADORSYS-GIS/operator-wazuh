@@ -1,21 +1,21 @@
 //! WazuhManagerCluster controller implementation
 
+use crate::error::{Error, Result};
+use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{
     ConfigMap, Container, PodSpec, PodTemplateSpec, Secret, Service, ServicePort, ServiceSpec,
     VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::ResourceExt;
+use operator_crds::{WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{info, error};
-use operator_crds::{WazuhManagerCluster, WazuhIndexerCluster};
-use crate::error::{Error, Result};
-use crate::tls::TlsManager;
+use tracing::{error, info};
 
 pub struct ManagerContext {
     pub client: kube::Client,
@@ -28,14 +28,19 @@ impl ManagerContext {
 }
 
 /// Reconcile function for WazuhManagerCluster
-pub async fn reconcile(manager: Arc<WazuhManagerCluster>, ctx: Arc<ManagerContext>) -> Result<Action> {
-    let ns = manager.namespace().ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+pub async fn reconcile(
+    manager: Arc<WazuhManagerCluster>,
+    ctx: Arc<ManagerContext>,
+) -> Result<Action> {
+    let ns = manager
+        .namespace()
+        .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let name = manager.name_any();
-    
+
     info!("Reconciling WazuhManagerCluster: {}/{}", ns, name);
 
     let client = ctx.client.clone();
-    
+
     // 1. Resolve indexer reference
     let indexer = resolve_indexer(&manager, client.clone()).await?;
     info!("Resolved indexer: {}", indexer.name_any());
@@ -120,19 +125,25 @@ async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Clie
     let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
 
     let sts = sts_api.get(&name).await?;
-    let ready_replicas = sts.status.as_ref().and_then(|s| s.ready_replicas).unwrap_or(0);
+    let ready_replicas = sts
+        .status
+        .as_ref()
+        .and_then(|s| s.ready_replicas)
+        .unwrap_or(0);
     let phase = if ready_replicas == manager.spec.replicas {
         "Ready"
     } else {
         "Progressing"
     };
 
-    let mut status = manager.status.clone().unwrap_or(operator_crds::wazuh_manager_cluster::WazuhManagerClusterStatus {
-        phase: phase.to_string(),
-        ready_nodes: ready_replicas,
-        leader: Some(format!("{}-0", name)),
-        api_endpoints: vec![format!("{}.{}.svc.cluster.local", name, ns)],
-    });
+    let mut status = manager.status.clone().unwrap_or(
+        operator_crds::wazuh_manager_cluster::WazuhManagerClusterStatus {
+            phase: phase.to_string(),
+            ready_nodes: ready_replicas,
+            leader: Some(format!("{}-0", name)),
+            api_endpoints: vec![format!("{}.{}.svc.cluster.local", name, ns)],
+        },
+    );
 
     status.phase = phase.to_string();
     status.ready_nodes = ready_replicas;
@@ -142,11 +153,7 @@ async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Clie
     });
 
     manager_api
-        .patch_status(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(&patch),
-        )
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
     Ok(())
@@ -190,10 +197,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                 spec: Some(PodSpec {
                     containers: vec![Container {
                         name: "manager".to_string(),
-                        image: Some(format!(
-                            "wazuh/wazuh-manager:{}",
-                            manager.spec.version
-                        )),
+                        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
                         volume_mounts: Some(vec![
                             VolumeMount {
                                 name: "config".to_string(),
@@ -254,7 +258,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
 fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> {
     let name = manager.name_any();
     let mut data = BTreeMap::new();
-    
+
     // In a real implementation, we would check if the secret already exists
     // and reuse the key. For now, we generate a new one.
     let key = "REPLACE_WITH_RANDOM_KEY_32_CHARS_LONG";
@@ -314,7 +318,10 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
     })
 }
 
-fn generate_config_map(manager: &WazuhManagerCluster, indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
+fn generate_config_map(
+    manager: &WazuhManagerCluster,
+    indexer: &WazuhIndexerCluster,
+) -> Result<ConfigMap> {
     let name = manager.name_any();
     let indexer_name = indexer.name_any();
     let indexer_ns = indexer.namespace().unwrap();
@@ -340,7 +347,10 @@ fn generate_config_map(manager: &WazuhManagerCluster, indexer: &WazuhIndexerClus
     </hosts>
   </indexer>
 </ossec_config>"#,
-        name, manager.namespace().unwrap(), indexer_name, indexer_ns
+        name,
+        manager.namespace().unwrap(),
+        indexer_name,
+        indexer_ns
     );
 
     let mut data = BTreeMap::new();
@@ -359,18 +369,30 @@ fn generate_config_map(manager: &WazuhManagerCluster, indexer: &WazuhIndexerClus
     })
 }
 
-async fn resolve_indexer(manager: &WazuhManagerCluster, client: kube::Client) -> Result<WazuhIndexerCluster> {
-    let ns = manager.spec.indexer_cluster.namespace.clone().unwrap_or_else(|| manager.namespace().unwrap());
+async fn resolve_indexer(
+    manager: &WazuhManagerCluster,
+    client: kube::Client,
+) -> Result<WazuhIndexerCluster> {
+    let ns = manager
+        .spec
+        .indexer_cluster
+        .namespace
+        .clone()
+        .unwrap_or_else(|| manager.namespace().unwrap());
     let name = &manager.spec.indexer_cluster.name;
-    
+
     let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(client, &ns);
     let indexer = indexer_api.get(name).await?;
-    
+
     Ok(indexer)
 }
 
 /// Error policy for WazuhManagerCluster reconciliation
-pub fn error_policy(_manager: Arc<WazuhManagerCluster>, error: &Error, _ctx: Arc<ManagerContext>) -> Action {
+pub fn error_policy(
+    _manager: Arc<WazuhManagerCluster>,
+    error: &Error,
+    _ctx: Arc<ManagerContext>,
+) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
 }

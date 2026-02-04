@@ -1,12 +1,12 @@
 //! WazuhRule and WazuhDecoder controllers implementation
 
-use kube::runtime::controller::Action;
+use crate::error::{Error, Result};
 use kube::ResourceExt;
+use kube::runtime::controller::Action;
+use operator_crds::{WazuhDecoder, WazuhRule};
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{info, error};
-use operator_crds::{WazuhRule, WazuhDecoder};
-use crate::error::{Error, Result};
+use tracing::{error, info};
 
 pub struct RuleContext {
     pub client: kube::Client,
@@ -20,9 +20,11 @@ impl RuleContext {
 
 /// Reconcile function for WazuhRule
 pub async fn reconcile_rule(rule: Arc<WazuhRule>, ctx: Arc<RuleContext>) -> Result<Action> {
-    let ns = rule.namespace().ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+    let ns = rule
+        .namespace()
+        .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let name = rule.name_any();
-    
+
     info!("Reconciling WazuhRule: {}/{}", ns, name);
 
     // TODO: Implement actual reconciliation logic:
@@ -49,10 +51,15 @@ impl DecoderContext {
 }
 
 /// Reconcile function for WazuhDecoder
-pub async fn reconcile_decoder(decoder: Arc<WazuhDecoder>, ctx: Arc<DecoderContext>) -> Result<Action> {
-    let ns = decoder.namespace().ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+pub async fn reconcile_decoder(
+    decoder: Arc<WazuhDecoder>,
+    ctx: Arc<DecoderContext>,
+) -> Result<Action> {
+    let ns = decoder
+        .namespace()
+        .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let name = decoder.name_any();
-    
+
     info!("Reconciling WazuhDecoder: {}/{}", ns, name);
 
     // TODO: Implement actual reconciliation logic:
@@ -63,7 +70,11 @@ pub async fn reconcile_decoder(decoder: Arc<WazuhDecoder>, ctx: Arc<DecoderConte
 }
 
 /// Error policy for WazuhDecoder reconciliation
-pub fn decoder_error_policy(_decoder: Arc<WazuhDecoder>, error: &Error, _ctx: Arc<DecoderContext>) -> Action {
+pub fn decoder_error_policy(
+    _decoder: Arc<WazuhDecoder>,
+    error: &Error,
+    _ctx: Arc<DecoderContext>,
+) -> Action {
     error!("Decoder reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
 }

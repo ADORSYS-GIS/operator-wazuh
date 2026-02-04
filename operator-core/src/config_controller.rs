@@ -1,12 +1,12 @@
 //! WazuhConfig controller implementation
 
-use kube::runtime::controller::Action;
+use crate::error::{Error, Result};
 use kube::ResourceExt;
+use kube::runtime::controller::Action;
+use operator_crds::WazuhConfig;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{info, error};
-use operator_crds::WazuhConfig;
-use crate::error::{Error, Result};
+use tracing::{error, info};
 
 pub struct ConfigContext {
     pub client: kube::Client,
@@ -20,9 +20,11 @@ impl ConfigContext {
 
 /// Reconcile function for WazuhConfig
 pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Result<Action> {
-    let ns = config.namespace().ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+    let ns = config
+        .namespace()
+        .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let name = config.name_any();
-    
+
     info!("Reconciling WazuhConfig: {}/{}", ns, name);
 
     // TODO: Implement actual reconciliation logic:

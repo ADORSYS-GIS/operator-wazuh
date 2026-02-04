@@ -1,8 +1,8 @@
 //! HTTP request handlers for the operator API
 
-use axum::{extract::Path, response::Json, http::StatusCode};
-use serde_json::{json, Value};
-use tracing::{info, error};
+use axum::{extract::Path, http::StatusCode, response::Json};
+use serde_json::{Value, json};
+use tracing::{error, info};
 
 /// Health check handler
 pub async fn health_handler() -> Result<Json<Value>, StatusCode> {
@@ -28,9 +28,11 @@ pub async fn metrics_handler() -> Result<String, StatusCode> {
 }
 
 /// Get cluster status
-pub async fn cluster_status_handler(Path(cluster_name): Path<String>) -> Result<Json<Value>, StatusCode> {
+pub async fn cluster_status_handler(
+    Path(cluster_name): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
     info!("Getting status for cluster: {}", cluster_name);
-    
+
     // TODO: Implement actual cluster status retrieval
     Ok(Json(json!({
         "cluster": cluster_name,

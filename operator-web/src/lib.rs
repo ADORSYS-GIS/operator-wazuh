@@ -1,5 +1,5 @@
 //! Web UI assets for the Wazuh operator
-//! 
+//!
 //! This module provides static assets and UI components for:
 //! - Dashboard interface
 //! - Cluster visualization

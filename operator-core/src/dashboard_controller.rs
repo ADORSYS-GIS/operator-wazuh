@@ -1,21 +1,21 @@
 //! WazuhDashboard controller implementation
 
+use crate::error::{Error, Result};
+use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{
     ConfigMap, Container, PodSpec, PodTemplateSpec, Secret, Service, ServicePort, ServiceSpec,
     Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::ResourceExt;
+use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{info, error};
-use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
-use crate::error::{Error, Result};
-use crate::tls::TlsManager;
+use tracing::{error, info};
 
 pub struct DashboardContext {
     pub client: kube::Client,
@@ -28,10 +28,15 @@ impl DashboardContext {
 }
 
 /// Reconcile function for WazuhDashboard
-pub async fn reconcile(dashboard: Arc<WazuhDashboard>, ctx: Arc<DashboardContext>) -> Result<Action> {
-    let ns = dashboard.namespace().ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
+pub async fn reconcile(
+    dashboard: Arc<WazuhDashboard>,
+    ctx: Arc<DashboardContext>,
+) -> Result<Action> {
+    let ns = dashboard
+        .namespace()
+        .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let name = dashboard.name_any();
-    
+
     info!("Reconciling WazuhDashboard: {}/{}", ns, name);
 
     let client = ctx.client.clone();
@@ -58,7 +63,7 @@ pub async fn reconcile(dashboard: Arc<WazuhDashboard>, ctx: Arc<DashboardContext
     if let Some(manager_ref) = &dashboard.spec.manager_cluster {
         let manager = resolve_dashboard_manager(&dashboard, client.clone()).await?;
         info!("Resolved manager for dashboard: {}", manager.name_any());
-        
+
         // Update ConfigMap with wazuh.yml
         let mut data = cm.data.clone().unwrap_or_default();
         let wazuh_yml = format!(
@@ -67,10 +72,11 @@ pub async fn reconcile(dashboard: Arc<WazuhDashboard>, ctx: Arc<DashboardContext
     user: admin
     password: admin
 "#,
-            manager.name_any(), manager.namespace().unwrap()
+            manager.name_any(),
+            manager.namespace().unwrap()
         );
         data.insert("wazuh.yml".to_string(), wazuh_yml);
-        
+
         let mut updated_cm = cm.clone();
         updated_cm.data = Some(data);
 
@@ -81,8 +87,11 @@ pub async fn reconcile(dashboard: Arc<WazuhDashboard>, ctx: Arc<DashboardContext
                 &Patch::Apply(&updated_cm),
             )
             .await?;
-            
-        info!("Successfully updated ConfigMap with wazuh.yml for dashboard {}", name);
+
+        info!(
+            "Successfully updated ConfigMap with wazuh.yml for dashboard {}",
+            name
+        );
     }
 
     // 4. Implement TLS and Secret Mounting
@@ -152,7 +161,10 @@ pub async fn reconcile(dashboard: Arc<WazuhDashboard>, ctx: Arc<DashboardContext
 
     // 7. Create Ingress (optional)
     // For now, we skip ingress implementation as it's optional and requires more complex configuration
-    info!("Skipping optional Ingress reconciliation for dashboard {}", name);
+    info!(
+        "Skipping optional Ingress reconciliation for dashboard {}",
+        name
+    );
 
     // 8. Update status
     update_dashboard_status(&dashboard, client).await?;
@@ -167,20 +179,28 @@ async fn update_dashboard_status(dashboard: &WazuhDashboard, client: kube::Clien
     let deploy_api: Api<Deployment> = Api::namespaced(client, &ns);
 
     let deploy = deploy_api.get(&name).await?;
-    let ready_replicas = deploy.status.as_ref().and_then(|s| s.ready_replicas).unwrap_or(0);
+    let ready_replicas = deploy
+        .status
+        .as_ref()
+        .and_then(|s| s.ready_replicas)
+        .unwrap_or(0);
     let phase = if ready_replicas == dashboard.spec.replicas {
         "Ready"
     } else {
         "Progressing"
     };
 
-    let mut status = dashboard.status.clone().unwrap_or(operator_crds::wazuh_dashboard::WazuhDashboardStatus {
-        phase: phase.to_string(),
-        ready_replicas,
-        url: Some(format!("{}.{}.svc.cluster.local", name, ns)),
-        indexer_connected: true, // Placeholder
-        manager_connected: Some(true), // Placeholder
-    });
+    let mut status =
+        dashboard
+            .status
+            .clone()
+            .unwrap_or(operator_crds::wazuh_dashboard::WazuhDashboardStatus {
+                phase: phase.to_string(),
+                ready_replicas,
+                url: Some(format!("{}.{}.svc.cluster.local", name, ns)),
+                indexer_connected: true,       // Placeholder
+                manager_connected: Some(true), // Placeholder
+            });
 
     status.phase = phase.to_string();
     status.ready_replicas = ready_replicas;
@@ -190,11 +210,7 @@ async fn update_dashboard_status(dashboard: &WazuhDashboard, client: kube::Clien
     });
 
     dashboard_api
-        .patch_status(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(&patch),
-        )
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
     Ok(())
@@ -258,14 +274,13 @@ fn generate_dashboard_deployment(dashboard: &WazuhDashboard) -> Result<Deploymen
                 spec: Some(PodSpec {
                     containers: vec![Container {
                         name: "dashboard".to_string(),
-                        image: Some(format!(
-                            "wazuh/wazuh-dashboard:{}",
-                            dashboard.spec.version
-                        )),
+                        image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
                         volume_mounts: Some(vec![
                             VolumeMount {
                                 name: "config".to_string(),
-                                mount_path: "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml".to_string(),
+                                mount_path:
+                                    "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml"
+                                        .to_string(),
                                 sub_path: Some("opensearch_dashboards.yml".to_string()),
                                 ..Default::default()
                             },
@@ -304,28 +319,49 @@ fn generate_dashboard_deployment(dashboard: &WazuhDashboard) -> Result<Deploymen
     })
 }
 
-async fn resolve_dashboard_manager(dashboard: &WazuhDashboard, client: kube::Client) -> Result<WazuhManagerCluster> {
-    let manager_ref = dashboard.spec.manager_cluster.as_ref().ok_or_else(|| Error::ValidationError("Manager reference is required".to_string()))?;
-    let ns = manager_ref.namespace.clone().unwrap_or_else(|| dashboard.namespace().unwrap());
+async fn resolve_dashboard_manager(
+    dashboard: &WazuhDashboard,
+    client: kube::Client,
+) -> Result<WazuhManagerCluster> {
+    let manager_ref = dashboard
+        .spec
+        .manager_cluster
+        .as_ref()
+        .ok_or_else(|| Error::ValidationError("Manager reference is required".to_string()))?;
+    let ns = manager_ref
+        .namespace
+        .clone()
+        .unwrap_or_else(|| dashboard.namespace().unwrap());
     let name = &manager_ref.name;
-    
+
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client, &ns);
     let manager = manager_api.get(name).await?;
-    
+
     Ok(manager)
 }
 
-async fn resolve_dashboard_indexer(dashboard: &WazuhDashboard, client: kube::Client) -> Result<WazuhIndexerCluster> {
-    let ns = dashboard.spec.indexer_cluster.namespace.clone().unwrap_or_else(|| dashboard.namespace().unwrap());
+async fn resolve_dashboard_indexer(
+    dashboard: &WazuhDashboard,
+    client: kube::Client,
+) -> Result<WazuhIndexerCluster> {
+    let ns = dashboard
+        .spec
+        .indexer_cluster
+        .namespace
+        .clone()
+        .unwrap_or_else(|| dashboard.namespace().unwrap());
     let name = &dashboard.spec.indexer_cluster.name;
-    
+
     let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(client, &ns);
     let indexer = indexer_api.get(name).await?;
-    
+
     Ok(indexer)
 }
 
-fn generate_dashboard_config_map(dashboard: &WazuhDashboard, indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
+fn generate_dashboard_config_map(
+    dashboard: &WazuhDashboard,
+    indexer: &WazuhIndexerCluster,
+) -> Result<ConfigMap> {
     let name = dashboard.name_any();
     let indexer_name = indexer.name_any();
     let indexer_ns = indexer.namespace().unwrap();
@@ -358,7 +394,11 @@ opensearch.password: "admin"
 }
 
 /// Error policy for WazuhDashboard reconciliation
-pub fn error_policy(_dashboard: Arc<WazuhDashboard>, error: &Error, _ctx: Arc<DashboardContext>) -> Action {
+pub fn error_policy(
+    _dashboard: Arc<WazuhDashboard>,
+    error: &Error,
+    _ctx: Arc<DashboardContext>,
+) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
 }

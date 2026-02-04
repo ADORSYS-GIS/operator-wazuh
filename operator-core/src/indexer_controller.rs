@@ -7,9 +7,9 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, LabelSelector, OwnerReference};
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, PostParams, Resource};
 use kube::runtime::controller::Action;
-use kube::ResourceExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -30,7 +30,10 @@ impl IndexerContext {
 }
 
 /// Reconcile function for WazuhIndexerCluster
-pub async fn reconcile(indexer: Arc<WazuhIndexerCluster>, ctx: Arc<IndexerContext>) -> Result<Action> {
+pub async fn reconcile(
+    indexer: Arc<WazuhIndexerCluster>,
+    ctx: Arc<IndexerContext>,
+) -> Result<Action> {
     let ns = indexer
         .namespace()
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
@@ -63,7 +66,10 @@ pub async fn reconcile(indexer: Arc<WazuhIndexerCluster>, ctx: Arc<IndexerContex
 
     update_status(&indexer, client.clone()).await?;
 
-    info!("Successfully reconciled StatefulSet and Service for {}", name);
+    info!(
+        "Successfully reconciled StatefulSet and Service for {}",
+        name
+    );
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
@@ -74,8 +80,12 @@ async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Re
     let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
 
     let sts = sts_api.get(&name).await?;
-    let ready_replicas = sts.status.as_ref().and_then(|s| s.ready_replicas).unwrap_or(0);
-    
+    let ready_replicas = sts
+        .status
+        .as_ref()
+        .and_then(|s| s.ready_replicas)
+        .unwrap_or(0);
+
     // Simple quorum check: at least half + 1 nodes must be ready
     let quorum = (indexer.spec.replicas / 2) + 1;
     Ok(ready_replicas >= quorum)
@@ -88,18 +98,24 @@ async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> R
     let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
 
     let sts = sts_api.get(&name).await?;
-    let ready_replicas = sts.status.as_ref().and_then(|s| s.ready_replicas).unwrap_or(0);
+    let ready_replicas = sts
+        .status
+        .as_ref()
+        .and_then(|s| s.ready_replicas)
+        .unwrap_or(0);
     let phase = if ready_replicas == indexer.spec.replicas {
         "Ready"
     } else {
         "Progressing"
     };
 
-    let mut status = indexer.status.clone().unwrap_or(operator_crds::wazuh_indexer_cluster::WazuhIndexerClusterStatus {
-        phase: phase.to_string(),
-        ready_nodes: ready_replicas,
-        endpoints: vec![format!("{}.{}.svc.cluster.local", name, ns)],
-    });
+    let mut status = indexer.status.clone().unwrap_or(
+        operator_crds::wazuh_indexer_cluster::WazuhIndexerClusterStatus {
+            phase: phase.to_string(),
+            ready_nodes: ready_replicas,
+            endpoints: vec![format!("{}.{}.svc.cluster.local", name, ns)],
+        },
+    );
 
     status.phase = phase.to_string();
     status.ready_nodes = ready_replicas;
@@ -109,11 +125,7 @@ async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> R
     });
 
     indexer_api
-        .patch_status(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(&patch),
-        )
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
     Ok(())
@@ -187,10 +199,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                 spec: Some(PodSpec {
                     containers: vec![Container {
                         name: "indexer".to_string(),
-                        image: Some(format!(
-                            "wazuh/wazuh-indexer:{}",
-                            indexer.spec.version
-                        )),
+                        image: Some(format!("wazuh/wazuh-indexer:{}", indexer.spec.version)),
                         env: Some(vec![
                             k8s_openapi::api::core::v1::EnvVar {
                                 name: "cluster.name".to_string(),
@@ -200,10 +209,12 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                             k8s_openapi::api::core::v1::EnvVar {
                                 name: "node.name".to_string(),
                                 value_from: Some(k8s_openapi::api::core::v1::EnvVarSource {
-                                    field_ref: Some(k8s_openapi::api::core::v1::ObjectFieldSelector {
-                                        field_path: "metadata.name".to_string(),
-                                        ..Default::default()
-                                    }),
+                                    field_ref: Some(
+                                        k8s_openapi::api::core::v1::ObjectFieldSelector {
+                                            field_path: "metadata.name".to_string(),
+                                            ..Default::default()
+                                        },
+                                    ),
                                     ..Default::default()
                                 }),
                                 ..Default::default()
@@ -215,7 +226,12 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                             },
                             k8s_openapi::api::core::v1::EnvVar {
                                 name: "cluster.initial_master_nodes".to_string(),
-                                value: Some((0..indexer.spec.replicas).map(|i| format!("{}-{}", name, i)).collect::<Vec<_>>().join(",")),
+                                value: Some(
+                                    (0..indexer.spec.replicas)
+                                        .map(|i| format!("{}-{}", name, i))
+                                        .collect::<Vec<_>>()
+                                        .join(","),
+                                ),
                                 ..Default::default()
                             },
                         ]),
@@ -265,7 +281,11 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
 }
 
 /// Error policy for WazuhIndexerCluster reconciliation
-pub fn error_policy(_indexer: Arc<WazuhIndexerCluster>, error: &Error, _ctx: Arc<IndexerContext>) -> Action {
+pub fn error_policy(
+    _indexer: Arc<WazuhIndexerCluster>,
+    error: &Error,
+    _ctx: Arc<IndexerContext>,
+) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
 }

@@ -1,7 +1,7 @@
 //! Kubernetes client management
 
-use kube::{Client, Config};
 use crate::error::Result;
+use kube::{Client, Config};
 
 pub struct ClientManager {
     client: Client,
@@ -12,7 +12,7 @@ impl ClientManager {
     pub async fn new() -> Result<Self> {
         let config = Config::infer().await?;
         let client = Client::try_from(config)?;
-        
+
         Ok(Self { client })
     }
 
@@ -26,7 +26,7 @@ impl ClientManager {
         let mut config = Config::infer().await?;
         config.default_namespace = namespace.to_string();
         let client = Client::try_from(config)?;
-        
+
         Ok(Self { client })
     }
 }

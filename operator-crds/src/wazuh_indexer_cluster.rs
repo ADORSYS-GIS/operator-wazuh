@@ -1,8 +1,8 @@
 //! WazuhIndexerCluster CRD definition
 
 use kube::CustomResource;
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(

@@ -18,6 +18,7 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
+reqwest = { workspace = true }
 operator-core = { workspace = true }
 operator-crds = { workspace = true }
 

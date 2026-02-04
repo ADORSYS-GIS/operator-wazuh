@@ -1,11 +1,11 @@
 //! Controller implementation for the Wazuh operator
 
-use kube::runtime::controller::{Action};
-use kube::runtime::watcher::Config;
+use crate::error::Result;
 use kube::api::Resource;
+use kube::runtime::controller::Action;
+use kube::runtime::watcher::Config;
 use std::sync::Arc;
 use tracing::info;
-use crate::error::Result;
 
 pub struct ControllerContext {
     pub client: kube::Client,
@@ -20,7 +20,12 @@ impl ControllerContext {
 /// Generic controller for managing custom resources
 pub struct WazuhController<T>
 where
-    T: Resource<DynamicType = ()> + Clone + serde::de::DeserializeOwned + serde::Serialize + Send + 'static,
+    T: Resource<DynamicType = ()>
+        + Clone
+        + serde::de::DeserializeOwned
+        + serde::Serialize
+        + Send
+        + 'static,
     T::DynamicType: Default,
 {
     context: Arc<ControllerContext>,
@@ -29,7 +34,12 @@ where
 
 impl<T> WazuhController<T>
 where
-    T: Resource<DynamicType = ()> + Clone + serde::de::DeserializeOwned + serde::Serialize + Send + 'static,
+    T: Resource<DynamicType = ()>
+        + Clone
+        + serde::de::DeserializeOwned
+        + serde::Serialize
+        + Send
+        + 'static,
     T::DynamicType: Default,
 {
     pub fn new(context: ControllerContext) -> Self {
@@ -42,10 +52,10 @@ where
     /// Run the controller
     pub async fn run(&self, namespace: Option<&str>) -> Result<()> {
         info!("Starting controller for {}", std::any::type_name::<T>());
-        
+
         // TODO: Implement actual controller logic
         // This is a placeholder implementation
-        
+
         Ok(())
     }
 }

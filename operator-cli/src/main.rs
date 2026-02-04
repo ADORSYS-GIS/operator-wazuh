@@ -1,13 +1,13 @@
 //! Command line interface for the Wazuh operator
-//! 
+//!
 //! This binary provides CLI commands for:
 //! - Running the operator
 //! - Generating CRD manifests
 //! - Managing clusters
 //! - Debugging and diagnostics
 
-use clap::Parser;
 use anyhow::Result;
+use clap::Parser;
 
 #[derive(Parser)]
 #[command(name = "wazuh-operator")]
@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
             use std::path::Path;
 
             println!("Generating CRD manifests to: {}", output_dir);
-            
+
             let output_path = Path::new(&output_dir);
             if !output_path.exists() {
                 fs::create_dir_all(output_path)?;

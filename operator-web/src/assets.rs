@@ -1,5 +1,5 @@
 //! Static assets for the web UI
-//! 
+//!
 //! This module provides embedded static files for the web interface.
 
 pub struct Assets;

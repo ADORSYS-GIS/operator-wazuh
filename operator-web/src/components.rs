@@ -1,5 +1,5 @@
 //! UI components for the web interface
-//! 
+//!
 //! This module provides reusable components for the web dashboard.
 
 pub struct Components;
