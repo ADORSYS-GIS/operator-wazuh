@@ -287,7 +287,12 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
-    let nginx_enabled = dashboard.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(true);
+    let nginx_enabled = dashboard
+        .spec
+        .nginx
+        .as_ref()
+        .map(|n| n.enabled)
+        .unwrap_or(true);
     let (port, target_port, port_name) = if nginx_enabled {
         (443, 8443, "https")
     } else {
@@ -340,51 +345,53 @@ fn generate_dashboard_deployment(
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
-    let nginx_enabled = dashboard.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(true);
+    let nginx_enabled = dashboard
+        .spec
+        .nginx
+        .as_ref()
+        .map(|n| n.enabled)
+        .unwrap_or(true);
 
-    let mut containers = vec![
-        Container {
-            name: "dashboard".to_string(),
-            image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
-            env: Some(vec![
-                EnvVar {
-                    name: "INDEXER_URL".to_string(),
-                    value: Some(format!(
-                        "https://{}.{}.svc.cluster.local:9200",
-                        indexer.name_any(),
-                        indexer.namespace().unwrap()
-                    )),
-                    ..Default::default()
-                },
-                EnvVar {
-                    name: "INDEXER_USER".to_string(),
-                    value: Some("admin".to_string()),
-                    ..Default::default()
-                },
-                EnvVar {
-                    name: "INDEXER_PASSWORD".to_string(),
-                    value: Some("admin".to_string()),
-                    ..Default::default()
-                },
-            ]),
-            volume_mounts: Some(vec![
-                VolumeMount {
-                    name: "config".to_string(),
-                    mount_path:
-                        "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml"
-                            .to_string(),
-                    sub_path: Some("opensearch_dashboards.yml".to_string()),
-                    ..Default::default()
-                },
-                VolumeMount {
-                    name: "tls".to_string(),
-                    mount_path: "/usr/share/wazuh-dashboard/config/certs".to_string(),
-                    ..Default::default()
-                },
-            ]),
-            ..Default::default()
-        },
-    ];
+    let mut containers = vec![Container {
+        name: "dashboard".to_string(),
+        image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
+        env: Some(vec![
+            EnvVar {
+                name: "INDEXER_URL".to_string(),
+                value: Some(format!(
+                    "https://{}.{}.svc.cluster.local:9200",
+                    indexer.name_any(),
+                    indexer.namespace().unwrap()
+                )),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_USER".to_string(),
+                value: Some("admin".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_PASSWORD".to_string(),
+                value: Some("admin".to_string()),
+                ..Default::default()
+            },
+        ]),
+        volume_mounts: Some(vec![
+            VolumeMount {
+                name: "config".to_string(),
+                mount_path: "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml"
+                    .to_string(),
+                sub_path: Some("opensearch_dashboards.yml".to_string()),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "tls".to_string(),
+                mount_path: "/usr/share/wazuh-dashboard/config/certs".to_string(),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }];
 
     if nginx_enabled {
         containers.push(Container {

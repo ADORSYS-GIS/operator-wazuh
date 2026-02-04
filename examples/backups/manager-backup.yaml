@@ -5,7 +5,7 @@ metadata:
   namespace: wazuh-test
 spec:
   wazuhManagerClusterRef: wazuh-manager
-  schedule: "0 3 * * *"
+  schedule: "*/5 * * * *"
   storage:
     pvc:
       claimName: manager-backup-pvc

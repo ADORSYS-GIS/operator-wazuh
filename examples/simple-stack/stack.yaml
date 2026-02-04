@@ -8,10 +8,6 @@ spec:
   version: "4.14.0"
   storage:
     size: "1Gi"
-  security:
-    job:
-      enabled: true
-      schedule: "*/1 * * * *"
 ---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster

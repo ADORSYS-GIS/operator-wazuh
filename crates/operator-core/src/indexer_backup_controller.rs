@@ -1,13 +1,13 @@
 use crate::error::{Error, Result};
 use k8s_openapi::api::batch::v1::{CronJob, CronJobSpec, JobSpec, JobTemplateSpec};
 use k8s_openapi::api::core::v1::{
-    Container, EnvVar, EnvVarSource, PodSpec, PodTemplateSpec, SecretKeySelector, Volume,
-    VolumeMount, PersistentVolumeClaimVolumeSource,
+    Container, EnvVar, EnvVarSource, PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
+    SecretKeySelector, Volume, VolumeMount,
 };
+use kube::ResourceExt;
 use kube::api::{Api, ObjectMeta, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::ResourceExt;
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::wazuh_indexer_backup::{BackupStorage, WazuhIndexerBackup};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -91,7 +91,7 @@ async fn cleanup_backup(
 fn generate_cronjob(backup: &WazuhIndexerBackup) -> Result<CronJob> {
     let name = backup.name_any();
     let ns = backup.namespace().unwrap();
-    
+
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer-backup".to_string());
     labels.insert("backup".to_string(), name.clone());
@@ -108,12 +108,10 @@ fn generate_cronjob(backup: &WazuhIndexerBackup) -> Result<CronJob> {
                 name: "backup".to_string(),
                 image: Some("amazon/aws-cli:latest".to_string()), // Placeholder image
                 command: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
-                args: Some(vec![
-                    format!(
-                        "echo 'Taking snapshot of {} to s3://{}'; aws s3 cp ...", 
-                        backup.spec.wazuh_indexer_cluster_ref, s3.bucket
-                    )
-                ]),
+                args: Some(vec![format!(
+                    "echo 'Taking snapshot of {} to s3://{}'; aws s3 cp ...",
+                    backup.spec.wazuh_indexer_cluster_ref, s3.bucket
+                )]),
                 env: Some(vec![
                     EnvVar {
                         name: "AWS_ACCESS_KEY_ID".to_string(),
@@ -154,31 +152,25 @@ fn generate_cronjob(backup: &WazuhIndexerBackup) -> Result<CronJob> {
                 name: "backup".to_string(),
                 image: Some("busybox:latest".to_string()), // Placeholder image
                 command: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
-                args: Some(vec![
-                    format!(
-                        "echo 'Taking snapshot of {} to /backup'; tar czf /backup/snapshot-$(date +%s).tar.gz ...", 
-                        backup.spec.wazuh_indexer_cluster_ref
-                    )
-                ]),
-                volume_mounts: Some(vec![
-                    VolumeMount {
-                        name: "backup-storage".to_string(),
-                        mount_path: "/backup".to_string(),
-                        ..Default::default()
-                    }
-                ]),
+                args: Some(vec![format!(
+                    "echo 'Simulating snapshot of {} to /backup'; touch /backup/snapshot-$(date +%s).tar.gz",
+                    backup.spec.wazuh_indexer_cluster_ref
+                )]),
+                volume_mounts: Some(vec![VolumeMount {
+                    name: "backup-storage".to_string(),
+                    mount_path: "/backup".to_string(),
+                    ..Default::default()
+                }]),
                 ..Default::default()
             };
-            let volumes = vec![
-                Volume {
-                    name: "backup-storage".to_string(),
-                    persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
-                        claim_name: pvc.claim_name.clone(),
-                        ..Default::default()
-                    }),
+            let volumes = vec![Volume {
+                name: "backup-storage".to_string(),
+                persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
+                    claim_name: pvc.claim_name.clone(),
                     ..Default::default()
-                }
-            ];
+                }),
+                ..Default::default()
+            }];
             (container, Some(volumes))
         }
     };
@@ -193,6 +185,8 @@ fn generate_cronjob(backup: &WazuhIndexerBackup) -> Result<CronJob> {
         },
         spec: Some(CronJobSpec {
             schedule: backup.spec.schedule.clone(),
+            concurrency_policy: Some("Forbid".to_string()),
+            starting_deadline_seconds: Some(60),
             job_template: JobTemplateSpec {
                 spec: Some(JobSpec {
                     template: PodTemplateSpec {

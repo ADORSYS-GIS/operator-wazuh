@@ -24,10 +24,6 @@ spec:
                 description: Number of indexer nodes
                 format: int32
                 type: integer
-              security:
-                description: Security configuration
-                nullable: true
-                type: object
               storage:
                 description: Storage configuration
                 properties:

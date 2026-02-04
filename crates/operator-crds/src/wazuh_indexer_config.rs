@@ -3,6 +3,22 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
+pub struct InternalUser {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reserved: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_roles: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<BTreeMap<String, String>>,
+}
+
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
     group = "wazuh.adorsys.team",
@@ -17,6 +33,9 @@ pub struct WazuhIndexerConfigSpec {
     pub wazuh_indexer_cluster_ref: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roles: Option<BTreeMap<String, serde_json::Value>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,7 +45,7 @@ pub struct WazuhIndexerConfigSpec {
     pub tenants: Option<BTreeMap<String, serde_json::Value>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub internal_users: Option<BTreeMap<String, serde_json::Value>>,
+    pub internal_users: Option<BTreeMap<String, InternalUser>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_groups: Option<BTreeMap<String, serde_json::Value>>,

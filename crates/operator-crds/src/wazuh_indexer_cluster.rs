@@ -22,13 +22,6 @@ pub struct WazuhIndexerClusterSpec {
     pub version: String,
     /// TLS configuration
     pub tls: Option<TlsConfig>,
-    /// Security configuration
-    pub security: Option<SecurityConfig>,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
-pub struct SecurityConfig {
-    // Removed job configuration as it's now handled by WazuhIndexerConfig
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

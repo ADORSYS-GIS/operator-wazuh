@@ -147,7 +147,12 @@ async fn reconcile_manager(
         .await?;
 
     // Generate Nginx ConfigMap if enabled
-    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+    let nginx_enabled = manager
+        .spec
+        .nginx
+        .as_ref()
+        .map(|n| n.enabled)
+        .unwrap_or(false);
     if nginx_enabled {
         let nginx_cm = generate_nginx_config_map(&manager)?;
         cm_api
@@ -289,7 +294,12 @@ fn generate_manager_statefulset(
     indexer: &WazuhIndexerCluster,
 ) -> Result<StatefulSet> {
     let name = manager.name_any();
-    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+    let nginx_enabled = manager
+        .spec
+        .nginx
+        .as_ref()
+        .map(|n| n.enabled)
+        .unwrap_or(false);
 
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
@@ -513,7 +523,12 @@ fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> 
 
 fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
     let name = manager.name_any();
-    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+    let nginx_enabled = manager
+        .spec
+        .nginx
+        .as_ref()
+        .map(|n| n.enabled)
+        .unwrap_or(false);
     let api_port = if nginx_enabled { 8443 } else { 55000 };
 
     let mut labels = BTreeMap::new();
@@ -556,7 +571,9 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
                 ServicePort {
                     name: Some("api".to_string()),
                     port: api_port,
-                    target_port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(api_port)),
+                    target_port: Some(
+                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(api_port),
+                    ),
                     ..Default::default()
                 },
             ]),

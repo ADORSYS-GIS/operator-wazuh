@@ -102,12 +102,8 @@ async fn reconcile_indexer(
         alt_names,
     )?;
 
-    let (admin_cert, admin_key) = TlsManager::generate_server_cert(
-        &ca_cert,
-        &ca_key,
-        "admin",
-        vec![],
-    )?;
+    let (admin_cert, admin_key) =
+        TlsManager::generate_server_cert(&ca_cert, &ca_key, "admin", vec![])?;
 
     let mut tls_data = BTreeMap::new();
     tls_data.insert("ca.crt".to_string(), ca_cert);
@@ -184,7 +180,6 @@ async fn reconcile_indexer(
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
-
 
 async fn cleanup_indexer(
     indexer: Arc<WazuhIndexerCluster>,

@@ -25,7 +25,31 @@ spec:
                 nullable: true
                 type: object
               internal_users:
-                additionalProperties: true
+                additionalProperties:
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      nullable: true
+                      type: object
+                    backend_roles:
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
+                    description:
+                      nullable: true
+                      type: string
+                    hash:
+                      nullable: true
+                      type: string
+                    hidden:
+                      nullable: true
+                      type: boolean
+                    reserved:
+                      nullable: true
+                      type: boolean
+                  type: object
                 nullable: true
                 type: object
               roles:
@@ -36,6 +60,9 @@ spec:
                 additionalProperties: true
                 nullable: true
                 type: object
+              schedule:
+                nullable: true
+                type: string
               tenants:
                 additionalProperties: true
                 nullable: true
