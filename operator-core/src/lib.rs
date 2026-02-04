@@ -12,6 +12,10 @@ pub mod client;
 pub mod indexer_controller;
 pub mod manager_controller;
 pub mod dashboard_controller;
+pub mod config_aggregator;
+pub mod config_controller;
+pub mod rule_controller;
+pub mod listener_controller;
 pub mod tls;
 
 pub use error::{Error, Result};

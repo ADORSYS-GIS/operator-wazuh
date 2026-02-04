@@ -20,6 +20,7 @@ impl Server {
         Router::new()
             .route("/healthz", get(health_handler))
             .route("/readyz", get(ready_handler))
+            .route("/validate", axum::routing::post(crate::webhooks::validate_config))
             .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
     }
 

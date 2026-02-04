@@ -9,5 +9,6 @@
 pub mod server;
 pub mod handlers;
 pub mod middleware;
+pub mod webhooks;
 
 pub use server::Server;

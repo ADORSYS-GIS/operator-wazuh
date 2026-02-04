@@ -11,6 +11,7 @@ pub mod wazuh_dashboard;
 pub mod wazuh_rule;
 pub mod wazuh_decoder;
 pub mod wazuh_config;
+pub mod wazuh_listener;
 
 pub use wazuh_indexer_cluster::WazuhIndexerCluster;
 pub use wazuh_manager_cluster::WazuhManagerCluster;
@@ -18,3 +19,4 @@ pub use wazuh_dashboard::WazuhDashboard;
 pub use wazuh_rule::WazuhRule;
 pub use wazuh_decoder::WazuhDecoder;
 pub use wazuh_config::WazuhConfig;
+pub use wazuh_listener::WazuhListener;

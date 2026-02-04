@@ -177,6 +177,14 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
+                    annotations: Some({
+                        let mut annotations = BTreeMap::new();
+                        annotations.insert(
+                            "wazuh.com/config-hash".to_string(),
+                            "PLACEHOLDER_HASH".to_string(),
+                        );
+                        annotations
+                    }),
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
@@ -186,22 +194,54 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                             "wazuh/wazuh-manager:{}",
                             manager.spec.version
                         )),
-                        volume_mounts: Some(vec![VolumeMount {
-                            name: "config".to_string(),
-                            mount_path: "/var/ossec/etc/ossec.conf".to_string(),
-                            sub_path: Some("ossec.conf".to_string()),
-                            ..Default::default()
-                        }]),
+                        volume_mounts: Some(vec![
+                            VolumeMount {
+                                name: "config".to_string(),
+                                mount_path: "/var/ossec/etc/ossec.conf".to_string(),
+                                sub_path: Some("ossec.conf".to_string()),
+                                ..Default::default()
+                            },
+                            VolumeMount {
+                                name: "rules".to_string(),
+                                mount_path: "/var/ossec/etc/rules/local_rules.xml".to_string(),
+                                sub_path: Some("local_rules.xml".to_string()),
+                                ..Default::default()
+                            },
+                            VolumeMount {
+                                name: "decoders".to_string(),
+                                mount_path: "/var/ossec/etc/decoders/local_decoder.xml".to_string(),
+                                sub_path: Some("local_decoder.xml".to_string()),
+                                ..Default::default()
+                            },
+                        ]),
                         ..Default::default()
                     }],
-                    volumes: Some(vec![k8s_openapi::api::core::v1::Volume {
-                        name: "config".to_string(),
-                        config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                            name: Some(format!("{}-config", name)),
+                    volumes: Some(vec![
+                        k8s_openapi::api::core::v1::Volume {
+                            name: "config".to_string(),
+                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                                name: Some(format!("{}-config", name)),
+                                ..Default::default()
+                            }),
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    }]),
+                        },
+                        k8s_openapi::api::core::v1::Volume {
+                            name: "rules".to_string(),
+                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                                name: Some(format!("{}-rules", name)),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        k8s_openapi::api::core::v1::Volume {
+                            name: "decoders".to_string(),
+                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                                name: Some(format!("{}-decoders", name)),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    ]),
                     ..Default::default()
                 }),
             },

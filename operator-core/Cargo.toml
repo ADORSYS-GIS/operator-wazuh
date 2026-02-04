@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rcgen = { workspace = true }
+sha2 = { workspace = true }
 operator-crds = { workspace = true }
 
 [lib]
