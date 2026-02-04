@@ -34,6 +34,15 @@ pub enum Commands {
         #[arg(short, long)]
         config_file: String,
     },
+    /// Inspect CRD status
+    Inspect {
+        #[arg(short, long)]
+        kind: String,
+        #[arg(short, long)]
+        name: String,
+        #[arg(short, long, default_value = "default")]
+        namespace: String,
+    },
 }
 
 #[tokio::main]
@@ -52,7 +61,7 @@ async fn main() -> Result<()> {
             use std::path::Path;
 
             println!("Generating CRD manifests to: {}", output_dir);
-
+            
             let output_path = Path::new(&output_dir);
             if !output_path.exists() {
                 fs::create_dir_all(output_path)?;
@@ -61,6 +70,13 @@ async fn main() -> Result<()> {
             let indexer_crd = operator_crds::WazuhIndexerCluster::crd();
             let manager_crd = operator_crds::WazuhManagerCluster::crd();
             let dashboard_crd = operator_crds::WazuhDashboard::crd();
+            let rule_crd = operator_crds::WazuhRule::crd();
+            let decoder_crd = operator_crds::WazuhDecoder::crd();
+            let config_crd = operator_crds::WazuhConfig::crd();
+            let listener_crd = operator_crds::WazuhListener::crd();
+            let security_crd = operator_crds::WazuhIndexerSecurity::crd();
+            let user_crd = operator_crds::WazuhIndexerUser::crd();
+            let template_crd = operator_crds::WazuhIndexerIndexTemplate::crd();
 
             fs::write(
                 output_path.join("wazuhindexercluster.yaml"),
@@ -74,6 +90,34 @@ async fn main() -> Result<()> {
                 output_path.join("wazuhdashboard.yaml"),
                 serde_yaml::to_string(&dashboard_crd)?,
             )?;
+            fs::write(
+                output_path.join("wazuhrule.yaml"),
+                serde_yaml::to_string(&rule_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhdecoder.yaml"),
+                serde_yaml::to_string(&decoder_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhconfig.yaml"),
+                serde_yaml::to_string(&config_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhlistener.yaml"),
+                serde_yaml::to_string(&listener_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhindexersecurity.yaml"),
+                serde_yaml::to_string(&security_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhindexeruser.yaml"),
+                serde_yaml::to_string(&user_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhindexerindextemplate.yaml"),
+                serde_yaml::to_string(&template_crd)?,
+            )?;
 
             println!("Successfully generated CRD manifests.");
             Ok(())
@@ -81,6 +125,11 @@ async fn main() -> Result<()> {
         Commands::Validate { config_file } => {
             println!("Validating configuration: {}", config_file);
             // TODO: Implement validation
+            Ok(())
+        }
+        Commands::Inspect { kind, name, namespace } => {
+            println!("Inspecting {}/{} in namespace {}", kind, name, namespace);
+            // TODO: Implement inspection logic using kube-rs
             Ok(())
         }
     }

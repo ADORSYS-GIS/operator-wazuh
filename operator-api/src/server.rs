@@ -24,6 +24,10 @@ impl Server {
                 "/validate",
                 axum::routing::post(crate::webhooks::validate_config),
             )
+            .route(
+                "/mutate",
+                axum::routing::post(crate::admission::mutate_config),
+            )
             .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
     }
 
