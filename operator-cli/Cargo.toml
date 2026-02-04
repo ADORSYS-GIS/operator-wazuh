@@ -1,0 +1,26 @@
+[package]
+name = "operator-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Command line interface for the Wazuh operator"
+
+[[bin]]
+name = "wazuh-operator"
+path = "src/main.rs"
+
+[dependencies]
+kube = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+operator-core = { workspace = true }
+operator-crds = { workspace = true }
+operator-api = { workspace = true }
+serde_yaml = { workspace = true }

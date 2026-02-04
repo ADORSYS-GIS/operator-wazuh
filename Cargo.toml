@@ -1,0 +1,78 @@
+[workspace]
+resolver = "3"
+members = [
+    "operator-crds",
+    "operator-core", 
+    "operator-api",
+    "operator-web",
+    "operator-cli"
+]
+
+[workspace.dependencies]
+operator-crds = { path = "./operator-crds" }
+operator-core = { path = "./operator-core" }
+operator-api = { path = "./operator-api" }
+operator-web = { path = "./operator-web" }
+operator-cli = { path = "./operator-cli" }
+
+# Core Kubernetes dependencies
+kube = { version = "0.93.1", features = ["runtime", "derive", "admission", "rustls-tls", "ws", "socks5"] }
+k8s-openapi = { version = "0.22.0", features = ["latest", "schemars"] }
+
+# Serialization and schema generation
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.120"
+serde_yaml = "0.9.33"
+schemars = "0.8.21"
+
+# Async runtime
+tokio = { version = "1.38.1", features = ["full"] }
+futures = "0.3.30"
+
+# Error handling
+anyhow = "1.0.86"
+thiserror = "1.0.62"
+
+# Logging
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+log = "0.4.22"
+env_logger = "0.11.3"
+
+# HTTP server
+axum = "0.7.5"
+tower = "0.4.13"
+tower-http = { version = "0.5.2", features = ["trace", "cors"] }
+
+# CLI
+clap = { version = "4.5.9", features = ["derive"] }
+
+# HTTP client
+reqwest = { version = "0.12.4", features = ["json"] }
+
+# Utilities
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
+rcgen = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+incremental = false
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+authors = [
+    "Stephane Segning <selastlambou@gmail.com>"
+]

@@ -1,0 +1,19 @@
+[package]
+name = "operator-crds"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "CRD definitions for the Wazuh operator"
+
+[dependencies]
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

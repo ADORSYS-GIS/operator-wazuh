@@ -1,0 +1,357 @@
+<context>
+# Overview
+The Wazuh Operator project provides a **cloud-native Kubernetes Operator** that manages the complete Wazuh security monitoring stack using declarative CRDs.
+
+It solves the operational complexity of deploying and maintaining:
+
+* Wazuh Indexers (OpenSearch)
+* Wazuh Managers (clustered control plane)
+* Wazuh Dashboard
+* Wazuh configuration objects (rules, decoders, policies)
+* OpenSearch security overrides (roles, tenants, mappings)
+* Dynamic networking needs (syslog ports, custom ingestion listeners)
+
+Target users:
+
+* Platform engineers running Wazuh in Kubernetes
+* Security teams needing reproducible SIEM deployments
+* Organizations adopting GitOps workflows
+
+Value:
+
+* Removes Helm-value drift and manual patching
+* Provides idempotent reconciliation for all components
+* Exposes security configuration as Kubernetes-native APIs
+
+---
+
+# Core Features
+
+## 1. Wazuh Indexer Cluster Management
+
+* **What it does:** Deploys and manages OpenSearch-based Wazuh indexer clusters.
+* **Why important:** Indexers are the persistence/search backbone of Wazuh.
+* **How it works:** Operator reconciles StatefulSets, PVCs, TLS, and exposes stable services.
+
+CRD: `WazuhIndexerCluster`
+
+---
+
+## 2. Wazuh Manager Cluster Management
+
+* **What it does:** Deploys clustered Wazuh managers.
+* **Why important:** Managers orchestrate agents, rules, and alert forwarding.
+* **How it works:** Operator ensures managers reference indexers and maintain HA quorum.
+
+CRD: `WazuhManagerCluster`
+
+---
+
+## 3. Dynamic Listener & Port Exposure
+
+* **What it does:** Adds ports dynamically (e.g. Syslog 11514 TCP/UDP).
+* **Why important:** Real deployments require flexible ingestion endpoints.
+* **How it works:** Operator creates container ports + Services + config reload.
+
+CRD: `WazuhListener`
+
+---
+
+## 4. Dashboard Deployment
+
+* **What it does:** Deploys Wazuh Dashboard UI connected to indexers.
+* **Why important:** Users need visualization and alert exploration.
+* **How it works:** Operator configures auth, ingress, and indexer connectivity.
+
+CRD: `WazuhDashboard`
+
+---
+
+## 5. Configuration Management (Rules/Decoders)
+
+* **What it does:** Manages Wazuh rules and decoders as Kubernetes objects.
+* **Why important:** Security logic must be version-controlled and reproducible.
+* **How it works:** Operator applies ordered config bundles into managers.
+
+CRDs: `WazuhConfig`, `WazuhRule`, `WazuhDecoder`
+
+---
+
+## 6. OpenSearch Security Overrides
+
+* **What it does:** Declaratively manages roles, tenants, mappings, templates.
+* **Why important:** Enterprise setups require custom RBAC and tenancy.
+* **How it works:** Operator reconciles CRDs through OpenSearch Security APIs.
+
+CRDs: `WazuhIndexerSecurity`, `WazuhIndexerUser`, `WazuhIndexerIndexTemplate`
+
+---
+
+## 7. Agent Group Policy Abstraction
+
+* **What it does:** Groups agents under shared rules/config.
+* **Why important:** Policy management at scale requires grouping.
+* **How it works:** Operator binds config objects to manager-side agent groups.
+
+CRD: `WazuhAgentGroup`
+
+---
+
+# User Experience
+
+## User Personas
+
+* **Platform Engineer:** Wants reliable, automated Wazuh infrastructure.
+* **Security Analyst:** Needs consistent dashboards, rules, alert pipelines.
+* **Compliance Engineer:** Requires controlled, auditable policy deployment.
+
+---
+
+## Key User Flows
+
+1. Deploy indexers:
+
+    * Apply `WazuhIndexerCluster`
+    * Wait for Ready condition
+
+2. Deploy managers:
+
+    * Apply `WazuhManagerCluster` referencing indexers
+
+3. Add dashboard:
+
+    * Apply `WazuhDashboard` referencing indexers
+
+4. Extend ingestion:
+
+    * Apply `WazuhListener` for syslog ports
+
+5. Manage policies:
+
+    * Apply `WazuhRule` + `WazuhDecoder`
+
+6. Override OpenSearch security:
+
+    * Apply `WazuhIndexerSecurity`
+
+---
+
+## UI/UX Considerations
+
+* kubectl-first UX (CRDs as primary interface)
+* Clear `.status.conditions` for every resource
+* GitOps-friendly YAML workflows
+* Minimal imperative actions required
+
+</context>
+
+<PRD>
+# Technical Architecture
+
+## System Components
+
+* **operator-crds**: Schema + OpenAPI definitions
+* **operator-core**: Reconciliation controllers
+* **operator-api**: OpenSearch + Wazuh API clients
+* **operator-web**: Axum admission webhook + health endpoints
+* **operator-cli**: Clap-based debugging/admin tool
+
+---
+
+## Data Models (CRDs)
+
+| Kind                      | Responsibility                |
+| ------------------------- | ----------------------------- |
+| WazuhIndexerCluster       | Indexer StatefulSet + storage |
+| WazuhManagerCluster       | Manager HA control plane      |
+| WazuhDashboard            | UI deployment                 |
+| WazuhListener             | Dynamic service ports         |
+| WazuhConfig               | Shared manager config         |
+| WazuhRule                 | Rule bundles                  |
+| WazuhDecoder              | Decoder bundles               |
+| WazuhIndexerSecurity      | Roles/tenants/mappings        |
+| WazuhIndexerUser          | User provisioning             |
+| WazuhIndexerIndexTemplate | Index templates               |
+| WazuhAgentGroup           | Agent grouping                |
+
+---
+
+## APIs and Integrations
+
+* Kubernetes API (kube-rs controllers)
+* OpenSearch Security API
+* Wazuh Manager REST API
+* Cert-manager integration (optional)
+
+---
+
+## Infrastructure Requirements
+
+* Kubernetes >= 1.25
+* CRDs installed cluster-wide
+* RBAC for managing StatefulSets, Services, Secrets
+* Persistent storage class support
+
+---
+
+# Development Roadmap
+
+## Phase 1: MVP Foundation
+
+* Implement core CRDs:
+
+    * IndexerCluster
+    * ManagerCluster
+    * Dashboard
+* Basic reconciliation:
+
+    * StatefulSet + Deployment creation
+    * Service wiring
+    * Status readiness reporting
+
+Deliverable: Deploy full Wazuh stack end-to-end.
+
+---
+
+## Phase 2: Configuration Layer
+
+* Add config CRDs:
+
+    * Rule
+    * Decoder
+    * Config bundle
+* Manager-side reconciliation:
+
+    * Mount configs
+    * Rolling restart on change
+
+Deliverable: GitOps-managed Wazuh policy deployment.
+
+---
+
+## Phase 3: Dynamic Networking
+
+* Implement Listener CRD
+* Service + port reconciliation
+* Manager config injection for syslog ingestion
+
+Deliverable: Dynamic ingestion ports without redeploying managers.
+
+---
+
+## Phase 4: OpenSearch Security Control Plane
+
+* Implement IndexerSecurity + User CRDs
+* API-driven reconciliation for:
+
+    * Roles
+    * Tenants
+    * Role mappings
+
+Deliverable: Declarative RBAC and tenancy.
+
+---
+
+## Phase 5: Advanced Production Features
+
+* Admission validation webhooks
+* Drift detection modes
+* Backup/restore CRDs
+* Multi-namespace and federation support
+
+---
+
+# Logical Dependency Chain
+
+1. **CRD + Operator Skeleton**
+
+    * Workspace setup
+    * kube-rs controller runtime
+
+2. **IndexerCluster Controller**
+
+    * Foundation for all other components
+
+3. **ManagerCluster Controller**
+
+    * Requires indexer references
+
+4. **Dashboard Controller**
+
+    * Visible UI quickly for usability
+
+5. **Config Controllers (Rules/Decoders)**
+
+    * Builds on managers
+
+6. **Listener Controller**
+
+    * Extends managers dynamically
+
+7. **Indexer Security Controllers**
+
+    * Adds enterprise RBAC + tenancy
+
+8. **Production Hardening**
+
+    * Webhooks, backups, federation
+
+---
+
+# Risks and Mitigations
+
+## Technical Challenges
+
+* OpenSearch Security API complexity
+
+    * Mitigation: strict idempotent reconciliation + drift checks
+
+* Rolling upgrades and cluster quorum
+
+    * Mitigation: controlled rolling restart logic
+
+* Config reload safety
+
+    * Mitigation: staged reconciliation with readiness gates
+
+---
+
+## MVP Scoping Risk
+
+Too many CRDs too early.
+
+Mitigation:
+
+* MVP = Indexer + Manager + Dashboard only
+* Add config + security overrides incrementally
+
+---
+
+## Resource Constraints
+
+Operator scope is large.
+
+Mitigation:
+
+* Modular mono-repo crates
+* Atomic controllers per CRD
+* Integration tests in Kind
+
+---
+
+# Appendix
+
+## Technical Specifications
+
+* Rust workspace with Axum + Clap
+* Async runtime: Tokio
+* CRD schema: Serde + Schemars
+* Operator framework: kube-rs
+
+## Future Research
+
+* Backup strategies for OpenSearch
+* Multi-cluster Wazuh federation
+* UI-based policy management
+
+</PRD>
