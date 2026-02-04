@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
-    group = "wazuh.com",
+    group = "wazuh.adorsys.team",
     version = "v1alpha1",
     kind = "WazuhIndexerSecurity",
     plural = "wazuhindexersecurities",

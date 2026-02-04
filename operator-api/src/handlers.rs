@@ -2,7 +2,7 @@
 
 use axum::{extract::Path, http::StatusCode, response::Json};
 use serde_json::{Value, json};
-use tracing::{error, info};
+use tracing::info;
 
 /// Health check handler
 pub async fn health_handler() -> Result<Json<Value>, StatusCode> {

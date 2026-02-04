@@ -2,7 +2,7 @@
 
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
 use serde_json::{Value, json};
-use tracing::{error, info};
+use tracing::info;
 
 /// Validating admission webhook for WazuhRule and WazuhDecoder
 pub async fn validate_config(Json(admission_review): Json<Value>) -> impl IntoResponse {

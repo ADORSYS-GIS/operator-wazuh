@@ -9,10 +9,10 @@ kind: ClusterRole
 metadata:
   name: wazuh-operator-role
 rules:
-- apiGroups: ["wazuh.com"]
+- apiGroups: ["wazuh.adorsys.team"]
   resources: ["wazuhindexerclusters", "wazuhmanagerclusters", "wazuhdashboards"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["wazuh.com"]
+- apiGroups: ["wazuh.adorsys.team"]
   resources: ["wazuhindexerclusters/status", "wazuhmanagerclusters/status", "wazuhdashboards/status"]
   verbs: ["get", "update", "patch"]
 - apiGroups: ["apps"]

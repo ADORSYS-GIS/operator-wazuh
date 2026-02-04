@@ -1,7 +1,7 @@
 //! HTTP middleware for the operator API
 
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
-use tracing::{info, warn};
+use tracing::info;
 
 /// Request logging middleware
 pub async fn request_logging_middleware(

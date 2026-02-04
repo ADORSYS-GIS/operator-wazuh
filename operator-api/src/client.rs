@@ -2,7 +2,7 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::info;
 
 pub struct ApiClient {
     client: Client,
