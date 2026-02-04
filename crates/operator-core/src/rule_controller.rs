@@ -209,7 +209,7 @@ async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
                 "template": {
                     "metadata": {
                         "annotations": {
-                            "wazuh.com/config-hash": hash
+                            "wazuh.adorsys.team/config-hash": hash
                         }
                     }
                 }

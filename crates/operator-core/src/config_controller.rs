@@ -120,7 +120,7 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
                 "template": {
                     "metadata": {
                         "annotations": {
-                            "wazuh.com/config-hash": hash
+                            "wazuh.adorsys.team/config-hash": hash
                         }
                     }
                 }

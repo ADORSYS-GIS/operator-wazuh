@@ -38,7 +38,7 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let dashboard_api: Api<WazuhDashboard> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&dashboard_api, "wazuh.com/finalizer", dashboard, |event| {
+    finalizer(&dashboard_api, "wazuh.adorsys.team/finalizer", dashboard, |event| {
         let ctx = ctx.clone();
         async move {
             match event {
@@ -132,9 +132,25 @@ async fn reconcile_dashboard(
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-dashboard".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
     let tls_secret = Secret {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-tls", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -253,6 +269,16 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-dashboard".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -260,6 +286,7 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -285,6 +312,16 @@ fn generate_dashboard_deployment(
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-dashboard".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -292,6 +329,7 @@ fn generate_dashboard_deployment(
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations.clone()),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -304,6 +342,7 @@ fn generate_dashboard_deployment(
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
+                    annotations: Some(annotations),
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
@@ -438,9 +477,25 @@ opensearch.password: "admin"
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-dashboard".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
     Ok(ConfigMap {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-config", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },

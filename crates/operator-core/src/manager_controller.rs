@@ -38,7 +38,7 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&manager_api, "wazuh.com/finalizer", manager, |event| {
+    finalizer(&manager_api, "wazuh.adorsys.team/finalizer", manager, |event| {
         let ctx = ctx.clone();
         async move {
             match event {
@@ -103,7 +103,27 @@ async fn reconcile_manager(
         )
         .await?;
 
-    info!("Successfully reconciled ConfigMap for {}", name);
+    // Generate rules ConfigMap
+    let rules_cm = generate_rules_config_map(&manager)?;
+    cm_api
+        .patch(
+            &format!("{}-rules", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&rules_cm),
+        )
+        .await?;
+
+    // Generate decoders ConfigMap
+    let decoders_cm = generate_decoders_config_map(&manager)?;
+    cm_api
+        .patch(
+            &format!("{}-decoders", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&decoders_cm),
+        )
+        .await?;
+
+    info!("Successfully reconciled ConfigMaps for {}", name);
 
     // 4. Create Services
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
@@ -211,6 +231,16 @@ fn generate_manager_statefulset(
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -218,6 +248,7 @@ fn generate_manager_statefulset(
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations.clone()),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -232,12 +263,12 @@ fn generate_manager_statefulset(
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
                     annotations: Some({
-                        let mut annotations = BTreeMap::new();
-                        annotations.insert(
-                            "wazuh.com/config-hash".to_string(),
+                        let mut ann = annotations;
+                        ann.insert(
+                            "wazuh.adorsys.team/config-hash".to_string(),
                             "PLACEHOLDER_HASH".to_string(),
                         );
-                        annotations
+                        ann
                     }),
                     ..Default::default()
                 }),
@@ -327,16 +358,33 @@ fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> 
     let name = manager.name_any();
     let mut data = BTreeMap::new();
 
-    // In a real implementation, we would check if the secret already exists
-    // and reuse the key. For now, we generate a new one.
+    // TODO
+    //  In a real implementation, we would check if the secret already exists
+    //  and reuse the key. For now, we generate a new one.
     let key = "REPLACE_WITH_RANDOM_KEY_32_CHARS_LONG";
     data.insert("cluster-key".to_string(), key.to_string());
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
     Ok(Secret {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-key", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -350,6 +398,16 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -357,6 +415,7 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -391,6 +450,16 @@ fn generate_manager_headless_service(manager: &WazuhManagerCluster) -> Result<Se
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -398,6 +467,7 @@ fn generate_manager_headless_service(manager: &WazuhManagerCluster) -> Result<Se
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-headless", name)),
             labels: Some(labels.clone()),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -455,9 +525,99 @@ fn generate_config_map(
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
     Ok(ConfigMap {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-config", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        data: Some(data),
+        ..Default::default()
+    })
+}
+
+fn generate_rules_config_map(manager: &WazuhManagerCluster) -> Result<ConfigMap> {
+    let name = manager.name_any();
+    let mut data = BTreeMap::new();
+    data.insert(
+        "local_rules.xml".to_string(),
+        "<group name=\"local, \">\n</group>".to_string(),
+    );
+
+    let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    Ok(ConfigMap {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-rules", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        data: Some(data),
+        ..Default::default()
+    })
+}
+
+fn generate_decoders_config_map(manager: &WazuhManagerCluster) -> Result<ConfigMap> {
+    let name = manager.name_any();
+    let mut data = BTreeMap::new();
+    data.insert(
+        "local_decoder.xml".to_string(),
+        "<decoder name=\"local_decoder\">\n</decoder>".to_string(),
+    );
+
+    let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    Ok(ConfigMap {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-decoders", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },

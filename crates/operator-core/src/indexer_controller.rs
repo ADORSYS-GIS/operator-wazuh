@@ -41,7 +41,7 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&indexer_api, "wazuh.com/finalizer", indexer, |event| {
+    finalizer(&indexer_api, "wazuh.adorsys.team/finalizer", indexer, |event| {
         let ctx = ctx.clone();
         async move {
             match event {
@@ -195,6 +195,16 @@ fn generate_configmap(indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -222,6 +232,7 @@ plugins.security.disabled: true
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-config", name)),
             labels: Some(labels),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -235,6 +246,16 @@ fn generate_headless_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -242,6 +263,7 @@ fn generate_headless_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-headless", name)),
             labels: Some(labels.clone()),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -271,6 +293,16 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -278,6 +310,7 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -304,6 +337,16 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
     labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
 
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -311,6 +354,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations.clone()),
             owner_references: owner_ref,
             ..Default::default()
         },
@@ -324,6 +368,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
+                    annotations: Some(annotations),
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
