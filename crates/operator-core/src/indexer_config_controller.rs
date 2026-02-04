@@ -267,6 +267,7 @@ fn generate_cronjob(
                         format!(
                             "/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
                             -cd /etc/wazuh-indexer/security-config \
+                            -p /etc/wazuh-indexer/certs \
                             -icl -nhnv \
                             -cacert /etc/wazuh-indexer/certs/ca.crt \
                             -cert /etc/wazuh-indexer/certs/admin.crt \
