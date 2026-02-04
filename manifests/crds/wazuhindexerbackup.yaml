@@ -1,0 +1,85 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerbackups.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerBackup
+    plural: wazuhindexerbackups
+    shortNames: []
+    singular: wazuhindexerbackup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerBackupSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              schedule:
+                description: Cron schedule for the backup
+                type: string
+              storage:
+                description: Storage configuration for the backup
+                oneOf:
+                - required:
+                  - s3
+                - required:
+                  - pvc
+                properties:
+                  pvc:
+                    properties:
+                      claimName:
+                        type: string
+                    required:
+                    - claimName
+                    type: object
+                  s3:
+                    properties:
+                      accessKeyIdSecretRef:
+                        type: string
+                      bucket:
+                        type: string
+                      endpoint:
+                        type: string
+                      secretAccessKeySecretRef:
+                        type: string
+                    required:
+                    - accessKeyIdSecretRef
+                    - bucket
+                    - endpoint
+                    - secretAccessKeySecretRef
+                    type: object
+                type: object
+              wazuhIndexerClusterRef:
+                description: Reference to the WazuhIndexerCluster to be backed up
+                type: string
+            required:
+            - schedule
+            - storage
+            - wazuhIndexerClusterRef
+            type: object
+          status:
+            nullable: true
+            properties:
+              last_backup:
+                description: Last backup time
+                nullable: true
+                type: string
+              last_backup_status:
+                description: Status of the last backup
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerBackup
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

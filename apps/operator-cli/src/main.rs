@@ -75,6 +75,10 @@ async fn main() -> Result<()> {
                 WazuhController::<operator_crds::WazuhIndexerSecurity>::new(context.clone());
             let indexer_config_controller =
                 WazuhController::<operator_crds::WazuhIndexerConfig>::new(context.clone());
+            let indexer_backup_controller =
+                WazuhController::<operator_crds::WazuhIndexerBackup>::new(context.clone());
+            let manager_backup_controller =
+                WazuhController::<operator_crds::WazuhManagerBackup>::new(context.clone());
 
             let namespace_opt = if namespace == "all" {
                 None
@@ -93,6 +97,8 @@ async fn main() -> Result<()> {
                 listener_res,
                 security_res,
                 indexer_config_res,
+                indexer_backup_res,
+                manager_backup_res,
             ) = join!(
                 indexer_controller.run(namespace_opt),
                 manager_controller.run(namespace_opt),
@@ -102,6 +108,8 @@ async fn main() -> Result<()> {
                 listener_controller.run(namespace_opt),
                 security_controller.run(namespace_opt),
                 indexer_config_controller.run(namespace_opt),
+                indexer_backup_controller.run(namespace_opt),
+                manager_backup_controller.run(namespace_opt),
             );
 
             indexer_res?;
@@ -112,6 +120,8 @@ async fn main() -> Result<()> {
             listener_res?;
             security_res?;
             indexer_config_res?;
+            indexer_backup_res?;
+            manager_backup_res?;
 
             Ok(())
         }
@@ -139,6 +149,8 @@ async fn main() -> Result<()> {
             let user_crd = operator_crds::WazuhIndexerUser::crd();
             let template_crd = operator_crds::WazuhIndexerIndexTemplate::crd();
             let agent_group_crd = operator_crds::WazuhAgentGroup::crd();
+            let indexer_backup_crd = operator_crds::WazuhIndexerBackup::crd();
+            let manager_backup_crd = operator_crds::WazuhManagerBackup::crd();
 
             fs::write(
                 output_path.join("wazuhindexercluster.yaml"),
@@ -187,6 +199,14 @@ async fn main() -> Result<()> {
             fs::write(
                 output_path.join("wazuhagentgroup.yaml"),
                 serde_yaml::to_string(&agent_group_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhindexerbackup.yaml"),
+                serde_yaml::to_string(&indexer_backup_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhmanagerbackup.yaml"),
+                serde_yaml::to_string(&manager_backup_crd)?,
             )?;
 
             println!("Successfully generated CRD manifests.");

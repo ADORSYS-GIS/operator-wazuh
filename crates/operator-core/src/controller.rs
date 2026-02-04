@@ -219,3 +219,71 @@ impl WazuhController<operator_crds::WazuhIndexerConfig> {
         Ok(())
     }
 }
+
+impl WazuhController<operator_crds::WazuhIndexerBackup> {
+    pub async fn run(&self, namespace: Option<&str>) -> Result<()> {
+        info!("Starting WazuhIndexerBackup controller");
+
+        let client = self.context.client.clone();
+        let api: Api<operator_crds::WazuhIndexerBackup> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+
+        let ctx = Arc::new(crate::indexer_backup_controller::IndexerBackupContext::new(
+            client.clone(),
+        ));
+
+        Controller::new(api, Config::default())
+            .shutdown_on_signal()
+            .run(
+                crate::indexer_backup_controller::reconcile,
+                crate::indexer_backup_controller::error_policy,
+                ctx,
+            )
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!("Reconciled {:?}", o),
+                    Err(e) => error!("Reconcile failed: {:?}", e),
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+}
+
+impl WazuhController<operator_crds::WazuhManagerBackup> {
+    pub async fn run(&self, namespace: Option<&str>) -> Result<()> {
+        info!("Starting WazuhManagerBackup controller");
+
+        let client = self.context.client.clone();
+        let api: Api<operator_crds::WazuhManagerBackup> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+
+        let ctx = Arc::new(crate::manager_backup_controller::ManagerBackupContext::new(
+            client.clone(),
+        ));
+
+        Controller::new(api, Config::default())
+            .shutdown_on_signal()
+            .run(
+                crate::manager_backup_controller::reconcile,
+                crate::manager_backup_controller::error_policy,
+                ctx,
+            )
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!("Reconciled {:?}", o),
+                    Err(e) => error!("Reconcile failed: {:?}", e),
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+}

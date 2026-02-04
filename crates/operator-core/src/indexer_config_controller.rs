@@ -308,7 +308,7 @@ fn generate_job(
                         Volume {
                             name: "security-config".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: Some(cm_name.to_string()),
+                                name: cm_name.to_string(),
                                 ..Default::default()
                             }),
                             ..Default::default()

@@ -78,6 +78,15 @@ spec:
                 required:
                 - name
                 type: object
+              nginx:
+                description: Nginx sidecar configuration
+                nullable: true
+                properties:
+                  enabled:
+                    default: true
+                    description: Enable Nginx sidecar
+                    type: boolean
+                type: object
               replicas:
                 description: Number of manager nodes
                 format: int32
