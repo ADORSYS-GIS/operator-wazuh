@@ -3,6 +3,7 @@
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -20,6 +21,8 @@ pub struct WazuhRuleSpec {
     pub filename: String,
     /// Priority for ordering rules
     pub priority: Option<i32>,
+    /// Selector to target specific manager nodes/clusters
+    pub node_selector: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

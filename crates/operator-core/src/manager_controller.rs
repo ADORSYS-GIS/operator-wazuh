@@ -11,7 +11,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::{WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -38,15 +38,20 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&manager_api, "wazuh.adorsys.team/finalizer", manager, |event| {
-        let ctx = ctx.clone();
-        async move {
-            match event {
-                FinalizerEvent::Apply(manager) => reconcile_manager(manager, ctx).await,
-                FinalizerEvent::Cleanup(manager) => cleanup_manager(manager, ctx).await,
+    finalizer(
+        &manager_api,
+        "wazuh.adorsys.team/finalizer",
+        manager,
+        |event| {
+            let ctx = ctx.clone();
+            async move {
+                match event {
+                    FinalizerEvent::Apply(manager) => reconcile_manager(manager, ctx).await,
+                    FinalizerEvent::Cleanup(manager) => cleanup_manager(manager, ctx).await,
+                }
             }
-        }
-    })
+        },
+    )
     .await
     .map_err(|e| Error::ReconciliationError(e.to_string()))
 }
@@ -68,11 +73,29 @@ async fn reconcile_manager(
 
     // 2. Generate TLS certificates
     let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+    let mut alt_names = vec![
+        name.clone(),
+        format!("{}.{}", name, ns),
+        format!("{}.{}.svc.cluster.local", name, ns),
+        format!("{}-headless", name),
+        format!("{}-headless.{}", name, ns),
+        format!("{}-headless.{}.svc.cluster.local", name, ns),
+    ];
+    for i in 0..manager.spec.replicas {
+        alt_names.push(format!("{}-{}", name, i));
+        alt_names.push(format!("{}-{}.{}-headless", name, i, name));
+        alt_names.push(format!("{}-{}.{}-headless.{}", name, i, name, ns));
+        alt_names.push(format!(
+            "{}-{}.{}-headless.{}.svc.cluster.local",
+            name, i, name, ns
+        ));
+    }
+
     let (server_cert, server_key) = TlsManager::generate_server_cert(
         &ca_cert,
         &ca_key,
         &format!("{}.{}.svc.cluster.local", name, ns),
-        vec![name.clone(), format!("{}.{}", name, ns)],
+        alt_names,
     )?;
 
     info!("Generated TLS certificates for {}", name);
@@ -123,6 +146,19 @@ async fn reconcile_manager(
         )
         .await?;
 
+    // Generate Nginx ConfigMap if enabled
+    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+    if nginx_enabled {
+        let nginx_cm = generate_nginx_config_map(&manager)?;
+        cm_api
+            .patch(
+                &format!("{}-nginx-config", name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&nginx_cm),
+            )
+            .await?;
+    }
+
     info!("Successfully reconciled ConfigMaps for {}", name);
 
     // 4. Create Services
@@ -150,6 +186,31 @@ async fn reconcile_manager(
         .await?;
 
     info!("Successfully reconciled Headless Service for {}", name);
+
+    // 5.1 Create TLS Secret
+    let mut tls_data = BTreeMap::new();
+    tls_data.insert("ca.crt".to_string(), ca_cert);
+    tls_data.insert("tls.crt".to_string(), server_cert);
+    tls_data.insert("tls.key".to_string(), server_key);
+
+    let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+    let tls_secret = Secret {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-tls", name)),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        string_data: Some(tls_data),
+        ..Default::default()
+    };
+
+    secret_api
+        .patch(
+            &format!("{}-tls", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&tls_secret),
+        )
+        .await?;
 
     // 6. Create StatefulSet
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
@@ -228,6 +289,8 @@ fn generate_manager_statefulset(
     indexer: &WazuhIndexerCluster,
 ) -> Result<StatefulSet> {
     let name = manager.name_any();
+    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
     labels.insert("cluster".to_string(), name.clone());
@@ -243,6 +306,131 @@ fn generate_manager_statefulset(
     );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+
+    let mut containers = vec![Container {
+        name: "manager".to_string(),
+        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
+        env: Some(vec![
+            EnvVar {
+                name: "INDEXER_URL".to_string(),
+                value: Some(format!(
+                    "https://{}.{}.svc.cluster.local:9200",
+                    indexer.name_any(),
+                    indexer.namespace().unwrap()
+                )),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_USER".to_string(),
+                value: Some("admin".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_PASSWORD".to_string(),
+                value: Some("admin".to_string()),
+                ..Default::default()
+            },
+        ]),
+        volume_mounts: Some(vec![
+            VolumeMount {
+                name: "config".to_string(),
+                mount_path: "/var/ossec/etc/ossec.conf".to_string(),
+                sub_path: Some("ossec.conf".to_string()),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "rules".to_string(),
+                mount_path: "/var/ossec/etc/rules/local_rules.xml".to_string(),
+                sub_path: Some("local_rules.xml".to_string()),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "decoders".to_string(),
+                mount_path: "/var/ossec/etc/decoders/local_decoder.xml".to_string(),
+                sub_path: Some("local_decoder.xml".to_string()),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "tls".to_string(),
+                mount_path: "/var/ossec/etc/certs".to_string(),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }];
+
+    if nginx_enabled {
+        containers.push(Container {
+            name: "nginx".to_string(),
+            image: Some("nginx:latest".to_string()),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: "nginx-config".to_string(),
+                    mount_path: "/etc/nginx/nginx.conf".to_string(),
+                    sub_path: Some("nginx.conf".to_string()),
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: "tls".to_string(),
+                    mount_path: "/etc/nginx/certs".to_string(),
+                    read_only: Some(true),
+                    ..Default::default()
+                },
+            ]),
+            ports: Some(vec![k8s_openapi::api::core::v1::ContainerPort {
+                container_port: 8443,
+                name: Some("https".to_string()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        });
+    }
+
+    let mut volumes = vec![
+        k8s_openapi::api::core::v1::Volume {
+            name: "config".to_string(),
+            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                name: format!("{}-config", name),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        k8s_openapi::api::core::v1::Volume {
+            name: "rules".to_string(),
+            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                name: format!("{}-rules", name),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        k8s_openapi::api::core::v1::Volume {
+            name: "decoders".to_string(),
+            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                name: format!("{}-decoders", name),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        k8s_openapi::api::core::v1::Volume {
+            name: "tls".to_string(),
+            secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
+                secret_name: Some(format!("{}-tls", name)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    ];
+
+    if nginx_enabled {
+        volumes.push(k8s_openapi::api::core::v1::Volume {
+            name: "nginx-config".to_string(),
+            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                name: format!("{}-nginx-config", name),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
 
     Ok(StatefulSet {
         metadata: kube::api::ObjectMeta {
@@ -273,78 +461,8 @@ fn generate_manager_statefulset(
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
-                    containers: vec![Container {
-                        name: "manager".to_string(),
-                        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
-                        env: Some(vec![
-                            EnvVar {
-                                name: "INDEXER_URL".to_string(),
-                                value: Some(format!(
-                                    "https://{}.{}.svc.cluster.local:9200",
-                                    indexer.name_any(),
-                                    indexer.namespace().unwrap()
-                                )),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "INDEXER_USER".to_string(),
-                                value: Some("admin".to_string()),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "INDEXER_PASSWORD".to_string(),
-                                value: Some("admin".to_string()),
-                                ..Default::default()
-                            },
-                        ]),
-                        volume_mounts: Some(vec![
-                            VolumeMount {
-                                name: "config".to_string(),
-                                mount_path: "/var/ossec/etc/ossec.conf".to_string(),
-                                sub_path: Some("ossec.conf".to_string()),
-                                ..Default::default()
-                            },
-                            VolumeMount {
-                                name: "rules".to_string(),
-                                mount_path: "/var/ossec/etc/rules/local_rules.xml".to_string(),
-                                sub_path: Some("local_rules.xml".to_string()),
-                                ..Default::default()
-                            },
-                            VolumeMount {
-                                name: "decoders".to_string(),
-                                mount_path: "/var/ossec/etc/decoders/local_decoder.xml".to_string(),
-                                sub_path: Some("local_decoder.xml".to_string()),
-                                ..Default::default()
-                            },
-                        ]),
-                        ..Default::default()
-                    }],
-                    volumes: Some(vec![
-                        k8s_openapi::api::core::v1::Volume {
-                            name: "config".to_string(),
-                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: format!("{}-config", name),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                        k8s_openapi::api::core::v1::Volume {
-                            name: "rules".to_string(),
-                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: format!("{}-rules", name),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                        k8s_openapi::api::core::v1::Volume {
-                            name: "decoders".to_string(),
-                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: format!("{}-decoders", name),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                    ]),
+                    containers,
+                    volumes: Some(volumes),
                     ..Default::default()
                 }),
             },
@@ -395,6 +513,9 @@ fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> 
 
 fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
     let name = manager.name_any();
+    let nginx_enabled = manager.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(false);
+    let api_port = if nginx_enabled { 8443 } else { 55000 };
+
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
     labels.insert("cluster".to_string(), name.clone());
@@ -434,7 +555,8 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
                 },
                 ServicePort {
                     name: Some("api".to_string()),
-                    port: 55000,
+                    port: api_port,
+                    target_port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(api_port)),
                     ..Default::default()
                 },
             ]),
@@ -616,6 +738,61 @@ fn generate_decoders_config_map(manager: &WazuhManagerCluster) -> Result<ConfigM
     Ok(ConfigMap {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{}-decoders", name)),
+            labels: Some(labels),
+            annotations: Some(annotations),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        data: Some(data),
+        ..Default::default()
+    })
+}
+
+fn generate_nginx_config_map(manager: &WazuhManagerCluster) -> Result<ConfigMap> {
+    let name = manager.name_any();
+    let mut data = BTreeMap::new();
+    let config = r#"
+events {
+  worker_connections 1024;
+}
+http {
+  server {
+    listen 8443 ssl;
+    ssl_certificate /etc/nginx/certs/tls.crt;
+    ssl_certificate_key /etc/nginx/certs/tls.key;
+    
+    location / {
+      proxy_pass https://127.0.0.1:55000;
+      proxy_ssl_verify off;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+}
+"#;
+    data.insert("nginx.conf".to_string(), config.to_string());
+
+    let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
+
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), name.clone());
+    labels.insert(
+        "app.kubernetes.io/managed-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "app.kubernetes.io/created-by".to_string(),
+        "wazuh-operator".to_string(),
+    );
+
+    Ok(ConfigMap {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-nginx-config", name)),
             labels: Some(labels),
             annotations: Some(annotations),
             owner_references: owner_ref,

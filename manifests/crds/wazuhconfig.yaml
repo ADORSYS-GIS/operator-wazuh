@@ -23,6 +23,12 @@ spec:
               content:
                 description: XML content of the main configuration (ossec.conf)
                 type: string
+              node_selector:
+                additionalProperties:
+                  type: string
+                description: Selector to target specific manager nodes/clusters
+                nullable: true
+                type: object
             required:
             - content
             type: object

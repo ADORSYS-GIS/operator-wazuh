@@ -24,6 +24,19 @@ pub struct WazuhManagerClusterSpec {
     pub api: Option<ApiConfig>,
     /// Wazuh manager version
     pub version: String,
+    /// Nginx sidecar configuration
+    pub nginx: Option<NginxConfig>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct NginxConfig {
+    /// Enable Nginx sidecar
+    #[serde(default = "default_nginx_enabled")]
+    pub enabled: bool,
+}
+
+fn default_nginx_enabled() -> bool {
+    true
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

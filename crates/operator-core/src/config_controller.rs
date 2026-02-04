@@ -33,33 +33,33 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
 
     let client = ctx.client.clone();
 
-    // 1. Aggregate all configs, rules, and decoders in the namespace
-    let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), &ns).await?;
-    let rules = ConfigAggregator::aggregate_rules(client.clone(), &ns).await?;
-    let decoders = ConfigAggregator::aggregate_decoders(client.clone(), &ns).await?;
-
-    // 2. Find all WazuhManagerClusters in the namespace to update their ConfigMaps
+    // 1. Find all WazuhManagerClusters in the namespace to update their ConfigMaps
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), &ns);
     let managers = manager_api.list(&kube::api::ListParams::default()).await?;
 
     for manager in managers {
         let manager_name = manager.name_any();
-        
+
+        // 2. Aggregate all configs, rules, and decoders for this specific manager
+        let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), &ns, &manager).await?;
+        let rules = ConfigAggregator::aggregate_rules(client.clone(), &ns, &manager).await?;
+        let decoders = ConfigAggregator::aggregate_decoders(client.clone(), &ns, &manager).await?;
+
         // Update ossec.conf ConfigMap
         let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
-        
-        // We need to merge the aggregated ossec_conf with the manager-specific parts 
-        // (like indexer hosts, cluster config). 
-        // For now, we'll just use the aggregated one if it's not empty, 
+
+        // We need to merge the aggregated ossec_conf with the manager-specific parts
+        // (like indexer hosts, cluster config).
+        // For now, we'll just use the aggregated one if it's not empty,
         // or fallback to a default if we had one.
         // Actually, the manager_controller already generates a base ossec.conf.
-        // A better approach is to have the manager_controller handle the base, 
+        // A better approach is to have the manager_controller handle the base,
         // and this controller handle the overrides or additional files.
         // But the task says "aggregating WazuhConfig, WazuhRule, and WazuhDecoder objects into ConfigMaps".
-        
+
         let mut config_data = BTreeMap::new();
         config_data.insert("ossec.conf".to_string(), ossec_conf.clone());
-        
+
         let cm = ConfigMap {
             metadata: kube::api::ObjectMeta {
                 name: Some(format!("{}-config", manager_name)),
@@ -70,11 +70,13 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
             ..Default::default()
         };
 
-        cm_api.patch(
-            &format!("{}-config", manager_name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&cm),
-        ).await?;
+        cm_api
+            .patch(
+                &format!("{}-config", manager_name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&cm),
+            )
+            .await?;
 
         // Update rules ConfigMap
         let rules_cm = ConfigMap {
@@ -87,11 +89,13 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
             ..Default::default()
         };
 
-        cm_api.patch(
-            &format!("{}-rules", manager_name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&rules_cm),
-        ).await?;
+        cm_api
+            .patch(
+                &format!("{}-rules", manager_name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&rules_cm),
+            )
+            .await?;
 
         // Update decoders ConfigMap
         let decoders_cm = ConfigMap {
@@ -104,11 +108,13 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
             ..Default::default()
         };
 
-        cm_api.patch(
-            &format!("{}-decoders", manager_name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&decoders_cm),
-        ).await?;
+        cm_api
+            .patch(
+                &format!("{}-decoders", manager_name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&decoders_cm),
+            )
+            .await?;
 
         // 3. Trigger rolling restart by updating annotation on StatefulSet
         let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
@@ -127,13 +133,18 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
             }
         });
 
-        sts_api.patch(
-            &manager_name,
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Strategic(&patch),
-        ).await?;
-        
-        info!("Updated ConfigMaps and triggered restart for manager: {}", manager_name);
+        sts_api
+            .patch(
+                &manager_name,
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Strategic(&patch),
+            )
+            .await?;
+
+        info!(
+            "Updated ConfigMaps and triggered restart for manager: {}",
+            manager_name
+        );
     }
 
     // 4. Update status of the WazuhConfig
@@ -147,11 +158,9 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
         }
     });
 
-    config_api.patch_status(
-        &name,
-        &PatchParams::default(),
-        &Patch::Merge(&patch),
-    ).await?;
+    config_api
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
+        .await?;
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
@@ -159,13 +168,13 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
 /// Error policy for WazuhConfig reconciliation
 pub fn error_policy(config: Arc<WazuhConfig>, error: &Error, ctx: Arc<ConfigContext>) -> Action {
     error!("Reconciliation failed: {:?}", error);
-    
+
     // Try to update status with error
     let client = ctx.client.clone();
     let ns = config.namespace().unwrap();
     let name = config.name_any();
     let config_api: Api<WazuhConfig> = Api::namespaced(client, &ns);
-    
+
     let patch = serde_json::json!({
         "status": {
             "applied": false,
@@ -174,11 +183,9 @@ pub fn error_policy(config: Arc<WazuhConfig>, error: &Error, ctx: Arc<ConfigCont
     });
 
     let _ = tokio::spawn(async move {
-        let _ = config_api.patch_status(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(&patch),
-        ).await;
+        let _ = config_api
+            .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
+            .await;
     });
 
     Action::requeue(Duration::from_secs(60))

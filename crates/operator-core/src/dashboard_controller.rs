@@ -11,7 +11,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -38,15 +38,20 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let dashboard_api: Api<WazuhDashboard> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&dashboard_api, "wazuh.adorsys.team/finalizer", dashboard, |event| {
-        let ctx = ctx.clone();
-        async move {
-            match event {
-                FinalizerEvent::Apply(dashboard) => reconcile_dashboard(dashboard, ctx).await,
-                FinalizerEvent::Cleanup(dashboard) => cleanup_dashboard(dashboard, ctx).await,
+    finalizer(
+        &dashboard_api,
+        "wazuh.adorsys.team/finalizer",
+        dashboard,
+        |event| {
+            let ctx = ctx.clone();
+            async move {
+                match event {
+                    FinalizerEvent::Apply(dashboard) => reconcile_dashboard(dashboard, ctx).await,
+                    FinalizerEvent::Cleanup(dashboard) => cleanup_dashboard(dashboard, ctx).await,
+                }
             }
-        }
-    })
+        },
+    )
     .await
     .map_err(|e| Error::ReconciliationError(e.to_string()))
 }
@@ -81,7 +86,7 @@ async fn reconcile_dashboard(
     info!("Successfully reconciled ConfigMap for dashboard {}", name);
 
     // 3. Implement Wazuh API Plugin Configuration
-    if let Some(manager_ref) = &dashboard.spec.manager_cluster {
+    if let Some(_manager_ref) = &dashboard.spec.manager_cluster {
         let manager = resolve_dashboard_manager(&dashboard, client.clone()).await?;
         info!("Resolved manager for dashboard: {}", manager.name_any());
 
@@ -282,6 +287,13 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let nginx_enabled = dashboard.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(true);
+    let (port, target_port, port_name) = if nginx_enabled {
+        (443, 8443, "https")
+    } else {
+        (5601, 5601, "http")
+    };
+
     Ok(Service {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
@@ -293,8 +305,11 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
         spec: Some(ServiceSpec {
             selector: Some(labels),
             ports: Some(vec![ServicePort {
-                name: Some("http".to_string()),
-                port: 5601,
+                name: Some(port_name.to_string()),
+                port,
+                target_port: Some(
+                    k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(target_port),
+                ),
                 ..Default::default()
             }]),
             type_: Some(dashboard.spec.service.service_type.clone()),
@@ -325,6 +340,100 @@ fn generate_dashboard_deployment(
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let nginx_enabled = dashboard.spec.nginx.as_ref().map(|n| n.enabled).unwrap_or(true);
+
+    let mut containers = vec![
+        Container {
+            name: "dashboard".to_string(),
+            image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
+            env: Some(vec![
+                EnvVar {
+                    name: "INDEXER_URL".to_string(),
+                    value: Some(format!(
+                        "https://{}.{}.svc.cluster.local:9200",
+                        indexer.name_any(),
+                        indexer.namespace().unwrap()
+                    )),
+                    ..Default::default()
+                },
+                EnvVar {
+                    name: "INDEXER_USER".to_string(),
+                    value: Some("admin".to_string()),
+                    ..Default::default()
+                },
+                EnvVar {
+                    name: "INDEXER_PASSWORD".to_string(),
+                    value: Some("admin".to_string()),
+                    ..Default::default()
+                },
+            ]),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: "config".to_string(),
+                    mount_path:
+                        "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml"
+                            .to_string(),
+                    sub_path: Some("opensearch_dashboards.yml".to_string()),
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: "tls".to_string(),
+                    mount_path: "/usr/share/wazuh-dashboard/config/certs".to_string(),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        },
+    ];
+
+    if nginx_enabled {
+        containers.push(Container {
+            name: "nginx".to_string(),
+            image: Some("nginx:stable-alpine".to_string()),
+            ports: Some(vec![k8s_openapi::api::core::v1::ContainerPort {
+                container_port: 8443,
+                name: Some("https".to_string()),
+                ..Default::default()
+            }]),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: "config".to_string(),
+                    mount_path: "/etc/nginx/nginx.conf".to_string(),
+                    sub_path: Some("nginx.conf".to_string()),
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: "tls".to_string(),
+                    mount_path: "/etc/nginx/certs".to_string(),
+                    ..Default::default()
+                },
+            ]),
+            liveness_probe: Some(k8s_openapi::api::core::v1::Probe {
+                http_get: Some(k8s_openapi::api::core::v1::HTTPGetAction {
+                    path: Some("/healthz".to_string()),
+                    port: k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(8443),
+                    scheme: Some("HTTPS".to_string()),
+                    ..Default::default()
+                }),
+                initial_delay_seconds: Some(10),
+                period_seconds: Some(10),
+                ..Default::default()
+            }),
+            readiness_probe: Some(k8s_openapi::api::core::v1::Probe {
+                http_get: Some(k8s_openapi::api::core::v1::HTTPGetAction {
+                    path: Some("/healthz".to_string()),
+                    port: k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(8443),
+                    scheme: Some("HTTPS".to_string()),
+                    ..Default::default()
+                }),
+                initial_delay_seconds: Some(5),
+                period_seconds: Some(5),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
+
     Ok(Deployment {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
@@ -346,47 +455,7 @@ fn generate_dashboard_deployment(
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
-                    containers: vec![Container {
-                        name: "dashboard".to_string(),
-                        image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
-                        env: Some(vec![
-                            EnvVar {
-                                name: "INDEXER_URL".to_string(),
-                                value: Some(format!(
-                                    "https://{}.{}.svc.cluster.local:9200",
-                                    indexer.name_any(),
-                                    indexer.namespace().unwrap()
-                                )),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "INDEXER_USER".to_string(),
-                                value: Some("admin".to_string()),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "INDEXER_PASSWORD".to_string(),
-                                value: Some("admin".to_string()),
-                                ..Default::default()
-                            },
-                        ]),
-                        volume_mounts: Some(vec![
-                            VolumeMount {
-                                name: "config".to_string(),
-                                mount_path:
-                                    "/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml"
-                                        .to_string(),
-                                sub_path: Some("opensearch_dashboards.yml".to_string()),
-                                ..Default::default()
-                            },
-                            VolumeMount {
-                                name: "tls".to_string(),
-                                mount_path: "/usr/share/wazuh-dashboard/config/certs".to_string(),
-                                ..Default::default()
-                            },
-                        ]),
-                        ..Default::default()
-                    }],
+                    containers,
                     volumes: Some(vec![
                         Volume {
                             name: "config".to_string(),
@@ -472,8 +541,41 @@ opensearch.password: "admin"
         indexer_name, indexer_ns
     );
 
+    let nginx_conf = r#"
+events {
+    worker_connections 1024;
+}
+http {
+    upstream dashboard {
+        server 127.0.0.1:5601;
+    }
+    server {
+        listen 8443 ssl;
+        server_name _;
+        ssl_certificate /etc/nginx/certs/tls.crt;
+        ssl_certificate_key /etc/nginx/certs/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass http://dashboard;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /healthz {
+            access_log off;
+            return 200 "OK";
+        }
+    }
+}
+"#;
+
     let mut data = BTreeMap::new();
     data.insert("opensearch_dashboards.yml".to_string(), config_yml);
+    data.insert("nginx.conf".to_string(), nginx_conf.to_string());
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 

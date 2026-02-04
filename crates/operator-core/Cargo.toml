@@ -23,6 +23,7 @@ rcgen = { workspace = true }
 sha2 = { workspace = true }
 operator-api = { workspace = true }
 operator-crds = { workspace = true }
+serde_yaml.workspace = true
 
 [lib]
 path = "src/lib.rs"

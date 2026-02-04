@@ -26,6 +26,12 @@ spec:
               filename:
                 description: Filename for the decoder (e.g., "local_decoder.xml")
                 type: string
+              node_selector:
+                additionalProperties:
+                  type: string
+                description: Selector to target specific manager nodes/clusters
+                nullable: true
+                type: object
               priority:
                 description: Priority for ordering decoders
                 format: int32

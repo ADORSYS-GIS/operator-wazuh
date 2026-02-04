@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 pub struct WazuhConfigSpec {
     /// XML content of the main configuration (ossec.conf)
     pub content: String,
+    /// Selector to target specific manager nodes/clusters
+    pub node_selector: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

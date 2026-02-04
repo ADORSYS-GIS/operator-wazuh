@@ -148,17 +148,17 @@ pub fn decoder_error_policy(
 
 /// Shared logic to trigger aggregation and update managers
 async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
-    // 1. Aggregate all configs, rules, and decoders in the namespace
-    let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), ns).await?;
-    let rules = ConfigAggregator::aggregate_rules(client.clone(), ns).await?;
-    let decoders = ConfigAggregator::aggregate_decoders(client.clone(), ns).await?;
-
-    // 2. Find all WazuhManagerClusters in the namespace to update their ConfigMaps
+    // 1. Find all WazuhManagerClusters in the namespace to update their ConfigMaps
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), ns);
     let managers = manager_api.list(&kube::api::ListParams::default()).await?;
 
     for manager in managers {
         let manager_name = manager.name_any();
+
+        // 2. Aggregate all configs, rules, and decoders for this specific manager
+        let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), ns, &manager).await?;
+        let rules = ConfigAggregator::aggregate_rules(client.clone(), ns, &manager).await?;
+        let decoders = ConfigAggregator::aggregate_decoders(client.clone(), ns, &manager).await?;
         let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), ns);
 
         // Update rules ConfigMap

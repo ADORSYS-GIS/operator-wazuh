@@ -12,6 +12,7 @@ pub mod config_controller;
 pub mod controller;
 pub mod dashboard_controller;
 pub mod error;
+pub mod indexer_config_controller;
 pub mod indexer_controller;
 pub mod listener_controller;
 pub mod manager_controller;

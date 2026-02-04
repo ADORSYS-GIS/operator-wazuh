@@ -9,10 +9,7 @@
 use anyhow::Result;
 use clap::Parser;
 use futures::join;
-use operator_core::{
-    config_controller, dashboard_controller, indexer_controller, listener_controller,
-    manager_controller, rule_controller, security_controller, WazuhController,
-};
+use operator_core::WazuhController;
 use tracing::info;
 
 #[derive(Parser)]
@@ -63,13 +60,21 @@ async fn main() -> Result<()> {
             let client = kube::Client::try_default().await?;
             let context = operator_core::controller::ControllerContext::new(client.clone());
 
-            let indexer_controller = WazuhController::<operator_crds::WazuhIndexerCluster>::new(context.clone());
-            let manager_controller = WazuhController::<operator_crds::WazuhManagerCluster>::new(context.clone());
-            let dashboard_controller = WazuhController::<operator_crds::WazuhDashboard>::new(context.clone());
-            let config_controller = WazuhController::<operator_crds::WazuhConfig>::new(context.clone());
+            let indexer_controller =
+                WazuhController::<operator_crds::WazuhIndexerCluster>::new(context.clone());
+            let manager_controller =
+                WazuhController::<operator_crds::WazuhManagerCluster>::new(context.clone());
+            let dashboard_controller =
+                WazuhController::<operator_crds::WazuhDashboard>::new(context.clone());
+            let config_controller =
+                WazuhController::<operator_crds::WazuhConfig>::new(context.clone());
             let rule_controller = WazuhController::<operator_crds::WazuhRule>::new(context.clone());
-            let listener_controller = WazuhController::<operator_crds::WazuhListener>::new(context.clone());
-            let security_controller = WazuhController::<operator_crds::WazuhIndexerSecurity>::new(context.clone());
+            let listener_controller =
+                WazuhController::<operator_crds::WazuhListener>::new(context.clone());
+            let security_controller =
+                WazuhController::<operator_crds::WazuhIndexerSecurity>::new(context.clone());
+            let indexer_config_controller =
+                WazuhController::<operator_crds::WazuhIndexerConfig>::new(context.clone());
 
             let namespace_opt = if namespace == "all" {
                 None
@@ -87,6 +92,7 @@ async fn main() -> Result<()> {
                 rule_res,
                 listener_res,
                 security_res,
+                indexer_config_res,
             ) = join!(
                 indexer_controller.run(namespace_opt),
                 manager_controller.run(namespace_opt),
@@ -95,6 +101,7 @@ async fn main() -> Result<()> {
                 rule_controller.run(namespace_opt),
                 listener_controller.run(namespace_opt),
                 security_controller.run(namespace_opt),
+                indexer_config_controller.run(namespace_opt),
             );
 
             indexer_res?;
@@ -104,6 +111,7 @@ async fn main() -> Result<()> {
             rule_res?;
             listener_res?;
             security_res?;
+            indexer_config_res?;
 
             Ok(())
         }
@@ -127,6 +135,7 @@ async fn main() -> Result<()> {
             let config_crd = operator_crds::WazuhConfig::crd();
             let listener_crd = operator_crds::WazuhListener::crd();
             let security_crd = operator_crds::WazuhIndexerSecurity::crd();
+            let indexer_config_crd = operator_crds::WazuhIndexerConfig::crd();
             let user_crd = operator_crds::WazuhIndexerUser::crd();
             let template_crd = operator_crds::WazuhIndexerIndexTemplate::crd();
             let agent_group_crd = operator_crds::WazuhAgentGroup::crd();
@@ -162,6 +171,10 @@ async fn main() -> Result<()> {
             fs::write(
                 output_path.join("wazuhindexersecurity.yaml"),
                 serde_yaml::to_string(&security_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhindexerconfig.yaml"),
+                serde_yaml::to_string(&indexer_config_crd)?,
             )?;
             fs::write(
                 output_path.join("wazuhindexeruser.yaml"),

@@ -24,6 +24,25 @@ spec:
                 description: Number of indexer nodes
                 format: int32
                 type: integer
+              security:
+                description: Security configuration
+                nullable: true
+                properties:
+                  job:
+                    description: Security job configuration
+                    nullable: true
+                    properties:
+                      enabled:
+                        description: Enable security job
+                        type: boolean
+                      schedule:
+                        description: Schedule for the security job (cron expression)
+                        nullable: true
+                        type: string
+                    required:
+                    - enabled
+                    type: object
+                type: object
               storage:
                 description: Storage configuration
                 properties:

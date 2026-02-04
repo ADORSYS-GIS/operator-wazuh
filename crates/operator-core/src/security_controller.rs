@@ -1,15 +1,15 @@
 //! OpenSearch security controllers implementation
 
 use crate::error::{Error, Result};
-use kube::api::{Api, Patch, PatchParams};
 use kube::ResourceExt;
+use kube::api::{Api, Patch, PatchParams};
 use kube::runtime::controller::Action;
 use operator_api::client::ApiClient;
 use operator_crds::{WazuhIndexerIndexTemplate, WazuhIndexerSecurity, WazuhIndexerUser};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct SecurityContext {
     pub client: kube::Client,
@@ -52,7 +52,10 @@ pub async fn reconcile_security(
         });
 
         api_client
-            .put::<serde_json::Value, _>(&format!("/_plugins/_security/api/roles/{}", role_name), &body)
+            .put::<serde_json::Value, _>(
+                &format!("/_plugins/_security/api/roles/{}", role_name),
+                &body,
+            )
             .await?;
         info!("Applied role: {}", role_name);
     }
@@ -65,7 +68,10 @@ pub async fn reconcile_security(
         });
 
         api_client
-            .put::<serde_json::Value, _>(&format!("/_plugins/_security/api/tenants/{}", tenant_name), &body)
+            .put::<serde_json::Value, _>(
+                &format!("/_plugins/_security/api/tenants/{}", tenant_name),
+                &body,
+            )
             .await?;
         info!("Applied tenant: {}", tenant_name);
     }
@@ -108,7 +114,13 @@ pub async fn reconcile_user(
     });
 
     api_client
-        .put::<serde_json::Value, _>(&format!("/_plugins/_security/api/internalusers/{}", user.spec.username), &body)
+        .put::<serde_json::Value, _>(
+            &format!(
+                "/_plugins/_security/api/internalusers/{}",
+                user.spec.username
+            ),
+            &body,
+        )
         .await?;
 
     // Update Status

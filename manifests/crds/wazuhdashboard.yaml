@@ -65,6 +65,16 @@ spec:
                 required:
                 - name
                 type: object
+              nginx:
+                description: Nginx configuration
+                nullable: true
+                properties:
+                  enabled:
+                    description: Enable Nginx sidecar
+                    type: boolean
+                required:
+                - enabled
+                type: object
               replicas:
                 description: Number of dashboard replicas
                 format: int32

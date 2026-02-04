@@ -26,6 +26,12 @@ spec:
               filename:
                 description: Filename for the rule (e.g., "local_rules.xml")
                 type: string
+              node_selector:
+                additionalProperties:
+                  type: string
+                description: Selector to target specific manager nodes/clusters
+                nullable: true
+                type: object
               priority:
                 description: Priority for ordering rules
                 format: int32

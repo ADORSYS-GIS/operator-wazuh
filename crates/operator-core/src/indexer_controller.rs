@@ -1,5 +1,6 @@
 //! WazuhIndexerCluster controller implementation
 
+use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
@@ -7,15 +8,15 @@ use k8s_openapi::api::core::v1::{
     ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, LabelSelector, OwnerReference};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use operator_crds::WazuhIndexerCluster;
 
@@ -41,15 +42,20 @@ pub async fn reconcile(
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&indexer_api, "wazuh.adorsys.team/finalizer", indexer, |event| {
-        let ctx = ctx.clone();
-        async move {
-            match event {
-                FinalizerEvent::Apply(indexer) => reconcile_indexer(indexer, ctx).await,
-                FinalizerEvent::Cleanup(indexer) => cleanup_indexer(indexer, ctx).await,
+    finalizer(
+        &indexer_api,
+        "wazuh.adorsys.team/finalizer",
+        indexer,
+        |event| {
+            let ctx = ctx.clone();
+            async move {
+                match event {
+                    FinalizerEvent::Apply(indexer) => reconcile_indexer(indexer, ctx).await,
+                    FinalizerEvent::Cleanup(indexer) => cleanup_indexer(indexer, ctx).await,
+                }
             }
-        }
-    })
+        },
+    )
     .await
     .map_err(|e| Error::ReconciliationError(e.to_string()))
 }
@@ -67,6 +73,67 @@ async fn reconcile_indexer(
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
+    let secret_api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), &ns);
+
+    // 0. Generate TLS
+    let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+    let mut alt_names = vec![
+        name.clone(),
+        format!("{}.{}", name, ns),
+        format!("{}.{}.svc.cluster.local", name, ns),
+        format!("{}-headless", name),
+        format!("{}-headless.{}", name, ns),
+        format!("{}-headless.{}.svc.cluster.local", name, ns),
+    ];
+    for i in 0..indexer.spec.replicas {
+        alt_names.push(format!("{}-{}", name, i));
+        alt_names.push(format!("{}-{}.{}-headless", name, i, name));
+        alt_names.push(format!("{}-{}.{}-headless.{}", name, i, name, ns));
+        alt_names.push(format!(
+            "{}-{}.{}-headless.{}.svc.cluster.local",
+            name, i, name, ns
+        ));
+    }
+
+    let (server_cert, server_key) = TlsManager::generate_server_cert(
+        &ca_cert,
+        &ca_key,
+        &format!("{}.{}.svc.cluster.local", name, ns),
+        alt_names,
+    )?;
+
+    let (admin_cert, admin_key) = TlsManager::generate_server_cert(
+        &ca_cert,
+        &ca_key,
+        "admin",
+        vec![],
+    )?;
+
+    let mut tls_data = BTreeMap::new();
+    tls_data.insert("ca.crt".to_string(), ca_cert);
+    tls_data.insert("tls.crt".to_string(), server_cert);
+    tls_data.insert("tls.key".to_string(), server_key);
+    tls_data.insert("admin.crt".to_string(), admin_cert);
+    tls_data.insert("admin.key".to_string(), admin_key);
+
+    let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+    let tls_secret = k8s_openapi::api::core::v1::Secret {
+        metadata: kube::api::ObjectMeta {
+            name: Some(format!("{}-tls", name)),
+            owner_references: owner_ref,
+            ..Default::default()
+        },
+        string_data: Some(tls_data),
+        ..Default::default()
+    };
+
+    secret_api
+        .patch(
+            &format!("{}-tls", name),
+            &PatchParams::apply("wazuh-operator"),
+            &Patch::Apply(&tls_secret),
+        )
+        .await?;
 
     // 1. Generate and Apply ConfigMap
     let cm = generate_configmap(&indexer)?;
@@ -117,6 +184,7 @@ async fn reconcile_indexer(
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
+
 
 async fn cleanup_indexer(
     indexer: Arc<WazuhIndexerCluster>,
@@ -217,7 +285,19 @@ network.host: 0.0.0.0
 bootstrap.memory_lock: true
 discovery.seed_hosts: ["{}-headless"]
 cluster.initial_master_nodes: [{}]
-plugins.security.disabled: true
+plugins.security.disabled: false
+plugins.security.ssl.transport.pemcert_filepath: certs/tls.crt
+plugins.security.ssl.transport.pemkey_filepath: certs/tls.key
+plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ca.crt
+plugins.security.ssl.transport.enforce_hostname_verification: false
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: certs/tls.crt
+plugins.security.ssl.http.pemkey_filepath: certs/tls.key
+plugins.security.ssl.http.pemtrustedcas_filepath: certs/ca.crt
+plugins.security.allow_unsafe_democertificates: true
+plugins.security.allow_default_init_securityindex: true
+plugins.security.authcz.admin_dn:
+  - CN=admin
 "#,
             name,
             name,
@@ -316,13 +396,11 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
         },
         spec: Some(ServiceSpec {
             selector: Some(labels),
-            ports: Some(vec![
-                ServicePort {
-                    name: Some("http".to_string()),
-                    port: 9200,
-                    ..Default::default()
-                },
-            ]),
+            ports: Some(vec![ServicePort {
+                name: Some("http".to_string()),
+                port: 9200,
+                ..Default::default()
+            }]),
             type_: Some("ClusterIP".to_string()),
             ..Default::default()
         }),
@@ -413,21 +491,37 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                             },
                             VolumeMount {
                                 name: "config".to_string(),
-                                mount_path: "/usr/share/opensearch/config/opensearch.yml".to_string(),
+                                mount_path: "/usr/share/opensearch/config/opensearch.yml"
+                                    .to_string(),
                                 sub_path: Some("opensearch.yml".to_string()),
+                                ..Default::default()
+                            },
+                            VolumeMount {
+                                name: "tls".to_string(),
+                                mount_path: "/usr/share/opensearch/config/certs".to_string(),
                                 ..Default::default()
                             },
                         ]),
                         ..Default::default()
                     }],
-                    volumes: Some(vec![k8s_openapi::api::core::v1::Volume {
-                        name: "config".to_string(),
-                        config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                            name: format!("{}-config", name),
+                    volumes: Some(vec![
+                        k8s_openapi::api::core::v1::Volume {
+                            name: "config".to_string(),
+                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                                name: format!("{}-config", name),
+                                ..Default::default()
+                            }),
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    }]),
+                        },
+                        k8s_openapi::api::core::v1::Volume {
+                            name: "tls".to_string(),
+                            secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
+                                secret_name: Some(format!("{}-tls", name)),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    ]),
                     ..Default::default()
                 }),
             },

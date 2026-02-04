@@ -50,15 +50,15 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
     // 2. Update manager configuration
     // We trigger a full config aggregation and update for all managers in the namespace
     // This is similar to what ConfigController does.
-    let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), &ns).await?;
-    let rules = ConfigAggregator::aggregate_rules(client.clone(), &ns).await?;
-    let decoders = ConfigAggregator::aggregate_decoders(client.clone(), &ns).await?;
-
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), &ns);
     let managers = manager_api.list(&kube::api::ListParams::default()).await?;
 
     for manager in managers {
         let manager_name = manager.name_any();
+
+        let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), &ns, &manager).await?;
+        let rules = ConfigAggregator::aggregate_rules(client.clone(), &ns, &manager).await?;
+        let decoders = ConfigAggregator::aggregate_decoders(client.clone(), &ns, &manager).await?;
         let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
 
         let mut config_data = BTreeMap::new();
@@ -133,7 +133,10 @@ fn generate_listener_service(listener: &WazuhListener) -> Result<Service> {
     let name = listener.name_any();
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-manager".to_string());
-    labels.insert("cluster".to_string(), listener.spec.manager_cluster.name.clone());
+    labels.insert(
+        "cluster".to_string(),
+        listener.spec.manager_cluster.name.clone(),
+    );
 
     let owner_ref = listener.controller_owner_ref(&()).map(|o| vec![o]);
 

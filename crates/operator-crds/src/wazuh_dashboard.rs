@@ -24,8 +24,16 @@ pub struct WazuhDashboardSpec {
     pub service: ServiceConfig,
     /// Authentication configuration
     pub auth: Option<AuthConfig>,
+    /// Nginx configuration
+    pub nginx: Option<NginxConfig>,
     /// Wazuh dashboard version
     pub version: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct NginxConfig {
+    /// Enable Nginx sidecar
+    pub enabled: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
