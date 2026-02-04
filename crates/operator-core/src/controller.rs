@@ -56,7 +56,10 @@ where
 
         // TODO: Implement actual controller logic
         // This is a placeholder implementation
-
-        Ok(())
+        
+        // Keep the controller running
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
     }
 }

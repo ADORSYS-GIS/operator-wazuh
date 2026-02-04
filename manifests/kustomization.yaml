@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: wazuh-system
+
+resources:
+- crds/wazuhagentgroup.yaml
+- crds/wazuhconfig.yaml
+- crds/wazuhdashboard.yaml
+- crds/wazuhdecoder.yaml
+- crds/wazuhindexercluster.yaml
+- crds/wazuhindexerindextemplate.yaml
+- crds/wazuhindexersecurity.yaml
+- crds/wazuhindexeruser.yaml
+- crds/wazuhlistener.yaml
+- crds/wazuhmanagercluster.yaml
+- crds/wazuhrule.yaml
+- rbac/operator.yaml
+- rbac/secrets.yaml
+- rbac/services.yaml
+- rbac/statefulsets.yaml
+- operator-deployment.yaml

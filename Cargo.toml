@@ -14,7 +14,7 @@ operator-api = { path = "./crates/operator-api" }
 operator-cli = { path = "./apps/operator-cli" }
 
 # Core Kubernetes dependencies
-kube = { version = "3", features = ["runtime", "derive", "admission", "rustls-tls", "ws", "socks5"] }
+kube = { version = "3", features = ["runtime", "derive", "admission", "rustls-tls", "ws", "socks5", "aws-lc-rs"] }
 k8s-openapi = { version = "0.27", features = ["latest", "schemars"] }
 
 # Serialization and schema generation

@@ -1,0 +1,23 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhIndexerCluster
+metadata:
+  name: wazuh-indexer
+  namespace: wazuh-system
+spec:
+  replicas: 1
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManagerCluster
+metadata:
+  name: wazuh-manager
+  namespace: wazuh-system
+spec:
+  replicas: 1
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhDashboard
+metadata:
+  name: wazuh-dashboard
+  namespace: wazuh-system
+spec:
+  replicas: 1

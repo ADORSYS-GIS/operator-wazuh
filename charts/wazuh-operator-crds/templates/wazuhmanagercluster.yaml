@@ -1,0 +1,124 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhmanagerclusters.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhManagerCluster
+    plural: wazuhmanagerclusters
+    shortNames: []
+    singular: wazuhmanagercluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhManagerClusterSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              api:
+                description: API configuration
+                nullable: true
+                properties:
+                  cors:
+                    description: CORS configuration
+                    nullable: true
+                    properties:
+                      allowed_origins:
+                        description: Allowed origins
+                        items:
+                          type: string
+                        nullable: true
+                        type: array
+                      enabled:
+                        description: Enable CORS
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
+                  enabled:
+                    description: Enable REST API
+                    type: boolean
+                  port:
+                    description: API port
+                    format: int32
+                    nullable: true
+                    type: integer
+                required:
+                - enabled
+                type: object
+              ha:
+                description: High availability configuration
+                nullable: true
+                properties:
+                  election_timeout:
+                    description: Leader election timeout
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable high availability
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              indexer_cluster:
+                description: Reference to indexer cluster
+                properties:
+                  name:
+                    description: Name of the indexer cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the indexer cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              replicas:
+                description: Number of manager nodes
+                format: int32
+                type: integer
+              version:
+                description: Wazuh manager version
+                type: string
+            required:
+            - indexer_cluster
+            - replicas
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              api_endpoints:
+                description: API endpoints
+                items:
+                  type: string
+                type: array
+              leader:
+                description: Current leader (for HA)
+                nullable: true
+                type: string
+              phase:
+                description: Current status of the cluster
+                type: string
+              ready_nodes:
+                description: Number of ready nodes
+                format: int32
+                type: integer
+            required:
+            - api_endpoints
+            - phase
+            - ready_nodes
+            type: object
+        required:
+        - spec
+        title: WazuhManagerCluster
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

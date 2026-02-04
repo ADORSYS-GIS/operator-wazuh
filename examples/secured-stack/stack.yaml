@@ -1,0 +1,23 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhIndexerCluster
+metadata:
+  name: wazuh-indexer-secured
+  namespace: wazuh-system
+spec:
+  replicas: 3
+  security:
+    tls:
+      enabled: true
+      secretName: indexer-tls-certs
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManagerCluster
+metadata:
+  name: wazuh-manager-secured
+  namespace: wazuh-system
+spec:
+  replicas: 2
+  security:
+    tls:
+      enabled: true
+      secretName: manager-tls-certs

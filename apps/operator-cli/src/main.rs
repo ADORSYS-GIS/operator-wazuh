@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
             let security_crd = operator_crds::WazuhIndexerSecurity::crd();
             let user_crd = operator_crds::WazuhIndexerUser::crd();
             let template_crd = operator_crds::WazuhIndexerIndexTemplate::crd();
+            let agent_group_crd = operator_crds::WazuhAgentGroup::crd();
 
             fs::write(
                 output_path.join("wazuhindexercluster.yaml"),
@@ -169,6 +170,10 @@ async fn main() -> Result<()> {
             fs::write(
                 output_path.join("wazuhindexerindextemplate.yaml"),
                 serde_yaml::to_string(&template_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhagentgroup.yaml"),
+                serde_yaml::to_string(&agent_group_crd)?,
             )?;
 
             println!("Successfully generated CRD manifests.");

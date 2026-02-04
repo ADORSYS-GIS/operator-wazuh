@@ -1,0 +1,1111 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wazuh-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhagentgroups.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhAgentGroup
+    plural: wazuhagentgroups
+    shortNames: []
+    singular: wazuhagentgroup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhAgentGroupSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              agent_ids:
+                description: List of agent IDs to include in this group
+                items:
+                  type: string
+                nullable: true
+                type: array
+              config_refs:
+                description: References to WazuhConfig objects to apply to this group
+                items:
+                  type: string
+                nullable: true
+                type: array
+              decoder_refs:
+                description: References to WazuhDecoder objects to apply to this group
+                items:
+                  type: string
+                nullable: true
+                type: array
+              name:
+                description: Name of the agent group in Wazuh
+                type: string
+              rule_refs:
+                description: References to WazuhRule objects to apply to this group
+                items:
+                  type: string
+                nullable: true
+                type: array
+            required:
+            - name
+            type: object
+          status:
+            nullable: true
+            properties:
+              agent_count:
+                description: Number of agents currently in the group
+                format: int32
+                type: integer
+              error:
+                description: Error message if synchronization failed
+                nullable: true
+                type: string
+              synchronized:
+                description: Whether the group has been synchronized with Wazuh
+                type: boolean
+            required:
+            - agent_count
+            - synchronized
+            type: object
+        required:
+        - spec
+        title: WazuhAgentGroup
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhconfigs.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhConfig
+    plural: wazuhconfigs
+    shortNames: []
+    singular: wazuhconfig
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhConfigSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              content:
+                description: XML content of the main configuration (ossec.conf)
+                type: string
+            required:
+            - content
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                description: Whether the configuration has been applied
+                type: boolean
+              error:
+                description: Error message if application failed
+                nullable: true
+                type: string
+              hash:
+                description: Hash of the content
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhConfig
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhdashboards.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhDashboard
+    plural: wazuhdashboards
+    shortNames: []
+    singular: wazuhdashboard
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhDashboardSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              auth:
+                description: Authentication configuration
+                nullable: true
+                properties:
+                  auth_secret:
+                    description: Authentication secret
+                    nullable: true
+                    type: string
+                  auth_type:
+                    description: Authentication type (basic, oauth, etc.)
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable authentication
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              indexer_cluster:
+                description: Reference to indexer cluster
+                properties:
+                  name:
+                    description: Name of the indexer cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the indexer cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              manager_cluster:
+                description: Reference to manager cluster
+                nullable: true
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              replicas:
+                description: Number of dashboard replicas
+                format: int32
+                type: integer
+              service:
+                description: Service configuration
+                properties:
+                  node_port:
+                    description: Node port (for NodePort service)
+                    format: int32
+                    nullable: true
+                    type: integer
+                  port:
+                    description: Service port
+                    format: int32
+                    nullable: true
+                    type: integer
+                  service_type:
+                    description: Service type (NodePort, LoadBalancer, ClusterIP)
+                    type: string
+                required:
+                - service_type
+                type: object
+              version:
+                description: Wazuh dashboard version
+                type: string
+            required:
+            - indexer_cluster
+            - replicas
+            - service
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              indexer_connected:
+                description: Connection status to indexer
+                type: boolean
+              manager_connected:
+                description: Connection status to manager
+                nullable: true
+                type: boolean
+              phase:
+                description: Current status of the dashboard
+                type: string
+              ready_replicas:
+                description: Number of ready replicas
+                format: int32
+                type: integer
+              url:
+                description: Dashboard URL
+                nullable: true
+                type: string
+            required:
+            - indexer_connected
+            - phase
+            - ready_replicas
+            type: object
+        required:
+        - spec
+        title: WazuhDashboard
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhdecoders.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhDecoder
+    plural: wazuhdecoders
+    shortNames: []
+    singular: wazuhdecoder
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhDecoderSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              content:
+                description: XML content of the decoder
+                type: string
+              filename:
+                description: Filename for the decoder (e.g., "local_decoder.xml")
+                type: string
+              priority:
+                description: Priority for ordering decoders
+                format: int32
+                nullable: true
+                type: integer
+            required:
+            - content
+            - filename
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                description: Whether the decoder has been applied
+                type: boolean
+              error:
+                description: Error message if application failed
+                nullable: true
+                type: string
+              hash:
+                description: Hash of the content
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhDecoder
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerclusters.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerCluster
+    plural: wazuhindexerclusters
+    shortNames: []
+    singular: wazuhindexercluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerClusterSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              replicas:
+                description: Number of indexer nodes
+                format: int32
+                type: integer
+              storage:
+                description: Storage configuration
+                properties:
+                  size:
+                    description: Storage size (e.g., "10Gi")
+                    type: string
+                  storage_class:
+                    description: Storage class
+                    nullable: true
+                    type: string
+                required:
+                - size
+                type: object
+              tls:
+                description: TLS configuration
+                nullable: true
+                properties:
+                  cert_secret:
+                    description: TLS certificate secret
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable TLS
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              version:
+                description: Wazuh indexer version
+                type: string
+            required:
+            - replicas
+            - storage
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              endpoints:
+                description: Cluster endpoints
+                items:
+                  type: string
+                type: array
+              phase:
+                description: Current status of the cluster
+                type: string
+              ready_nodes:
+                description: Number of ready nodes
+                format: int32
+                type: integer
+            required:
+            - endpoints
+            - phase
+            - ready_nodes
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerCluster
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerindextemplates.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerIndexTemplate
+    plural: wazuhindexerindextemplates
+    shortNames: []
+    singular: wazuhindexerindextemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerIndexTemplateSpec
+          via `CustomResource`
+        properties:
+          spec:
+            properties:
+              index_patterns:
+                description: Index patterns
+                items:
+                  type: string
+                type: array
+              name:
+                description: Template name
+                type: string
+              settings:
+                description: Template settings (JSON string)
+                type: string
+            required:
+            - index_patterns
+            - name
+            - settings
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                type: boolean
+              error:
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerIndexTemplate
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexersecurities.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerSecurity
+    plural: wazuhindexersecurities
+    shortNames: []
+    singular: wazuhindexersecurity
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerSecuritySpec via
+          `CustomResource`
+        properties:
+          spec:
+            properties:
+              roles:
+                description: Role definitions
+                items:
+                  properties:
+                    cluster_permissions:
+                      items:
+                        type: string
+                      type: array
+                    index_permissions:
+                      items:
+                        properties:
+                          allowed_actions:
+                            items:
+                              type: string
+                            type: array
+                          index_patterns:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - allowed_actions
+                        - index_patterns
+                        type: object
+                      type: array
+                    name:
+                      type: string
+                  required:
+                  - cluster_permissions
+                  - index_permissions
+                  - name
+                  type: object
+                type: array
+              tenants:
+                description: Tenant definitions
+                items:
+                  properties:
+                    description:
+                      nullable: true
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+            required:
+            - roles
+            - tenants
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                type: boolean
+              error:
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerSecurity
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerusers.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerUser
+    plural: wazuhindexerusers
+    shortNames: []
+    singular: wazuhindexeruser
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerUserSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              password_secret:
+                description: Password secret reference
+                nullable: true
+                type: string
+              roles:
+                description: Roles assigned to the user
+                items:
+                  type: string
+                type: array
+              username:
+                description: Username
+                type: string
+            required:
+            - roles
+            - username
+            type: object
+          status:
+            nullable: true
+            properties:
+              created:
+                type: boolean
+              error:
+                nullable: true
+                type: string
+            required:
+            - created
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerUser
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhlisteners.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhListener
+    plural: wazuhlisteners
+    shortNames: []
+    singular: wazuhlistener
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhListenerSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              manager_cluster:
+                description: Reference to manager cluster
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              port:
+                description: Port number to expose
+                format: int32
+                type: integer
+              protocol:
+                description: Protocol (TCP or UDP)
+                type: string
+            required:
+            - manager_cluster
+            - port
+            - protocol
+            type: object
+          status:
+            nullable: true
+            properties:
+              ready:
+                description: Whether the listener is ready
+                type: boolean
+              service_name:
+                description: Service name created for the listener
+                nullable: true
+                type: string
+            required:
+            - ready
+            type: object
+        required:
+        - spec
+        title: WazuhListener
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhmanagerclusters.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhManagerCluster
+    plural: wazuhmanagerclusters
+    shortNames: []
+    singular: wazuhmanagercluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhManagerClusterSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              api:
+                description: API configuration
+                nullable: true
+                properties:
+                  cors:
+                    description: CORS configuration
+                    nullable: true
+                    properties:
+                      allowed_origins:
+                        description: Allowed origins
+                        items:
+                          type: string
+                        nullable: true
+                        type: array
+                      enabled:
+                        description: Enable CORS
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
+                  enabled:
+                    description: Enable REST API
+                    type: boolean
+                  port:
+                    description: API port
+                    format: int32
+                    nullable: true
+                    type: integer
+                required:
+                - enabled
+                type: object
+              ha:
+                description: High availability configuration
+                nullable: true
+                properties:
+                  election_timeout:
+                    description: Leader election timeout
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable high availability
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              indexer_cluster:
+                description: Reference to indexer cluster
+                properties:
+                  name:
+                    description: Name of the indexer cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the indexer cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              replicas:
+                description: Number of manager nodes
+                format: int32
+                type: integer
+              version:
+                description: Wazuh manager version
+                type: string
+            required:
+            - indexer_cluster
+            - replicas
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              api_endpoints:
+                description: API endpoints
+                items:
+                  type: string
+                type: array
+              leader:
+                description: Current leader (for HA)
+                nullable: true
+                type: string
+              phase:
+                description: Current status of the cluster
+                type: string
+              ready_nodes:
+                description: Number of ready nodes
+                format: int32
+                type: integer
+            required:
+            - api_endpoints
+            - phase
+            - ready_nodes
+            type: object
+        required:
+        - spec
+        title: WazuhManagerCluster
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhrules.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhRule
+    plural: wazuhrules
+    shortNames: []
+    singular: wazuhrule
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhRuleSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              content:
+                description: XML content of the rule
+                type: string
+              filename:
+                description: Filename for the rule (e.g., "local_rules.xml")
+                type: string
+              priority:
+                description: Priority for ordering rules
+                format: int32
+                nullable: true
+                type: integer
+            required:
+            - content
+            - filename
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                description: Whether the rule has been applied
+                type: boolean
+              error:
+                description: Error message if application failed
+                nullable: true
+                type: string
+              hash:
+                description: Hash of the content
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhRule
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-role
+rules:
+- apiGroups:
+  - wazuh.adorsys.team
+  resources:
+  - wazuhindexerclusters
+  - wazuhmanagerclusters
+  - wazuhdashboards
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - wazuh.adorsys.team
+  resources:
+  - wazuhindexerclusters/status
+  - wazuhmanagerclusters/status
+  - wazuhdashboards/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  - pods
+  - configmaps
+  - secrets
+  - persistentvolumeclaims
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-secrets-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - configmaps
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-services-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-statefulsets-role
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets/status
+  verbs:
+  - get
+  - update
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-secrets-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-secrets-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-services-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-services-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-statefulsets-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-statefulsets-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wazuh-operator
+  namespace: wazuh-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wazuh-operator
+  template:
+    metadata:
+      labels:
+        app: wazuh-operator
+    spec:
+      containers:
+      - command:
+        - /usr/local/bin/wazuh-operator
+        - run
+        - --namespace
+        - all
+        env:
+        - name: RUST_LOG
+          value: info
+        image: wazuh-operator:latest
+        imagePullPolicy: IfNotPresent
+        name: operator
+      serviceAccountName: wazuh-operator
