@@ -180,7 +180,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                 match_labels: Some(labels.clone()),
                 ..Default::default()
             },
-            service_name: name.clone(),
+            service_name: Some(name.clone()),
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),
@@ -224,7 +224,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                         k8s_openapi::api::core::v1::Volume {
                             name: "config".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: Some(format!("{}-config", name)),
+                                name: format!("{}-config", name),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -232,7 +232,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                         k8s_openapi::api::core::v1::Volume {
                             name: "rules".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: Some(format!("{}-rules", name)),
+                                name: format!("{}-rules", name),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -240,7 +240,7 @@ fn generate_manager_statefulset(manager: &WazuhManagerCluster) -> Result<Statefu
                         k8s_openapi::api::core::v1::Volume {
                             name: "decoders".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: Some(format!("{}-decoders", name)),
+                                name: format!("{}-decoders", name),
                                 ..Default::default()
                             }),
                             ..Default::default()

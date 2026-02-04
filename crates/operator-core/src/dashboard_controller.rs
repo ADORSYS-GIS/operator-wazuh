@@ -296,7 +296,7 @@ fn generate_dashboard_deployment(dashboard: &WazuhDashboard) -> Result<Deploymen
                         Volume {
                             name: "config".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: Some(format!("{}-config", name)),
+                                name: format!("{}-config", name),
                                 ..Default::default()
                             }),
                             ..Default::default()

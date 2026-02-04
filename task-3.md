@@ -1,4 +1,3 @@
-<context>
 # Overview
 The Wazuh Operator project provides a **cloud-native Kubernetes Operator** that manages the complete Wazuh security monitoring stack using declarative CRDs.
 
@@ -143,9 +142,6 @@ CRD: `WazuhAgentGroup`
 * GitOps-friendly YAML workflows
 * Minimal imperative actions required
 
-</context>
-
-<PRD>
 # Technical Architecture
 
 ## System Components
@@ -353,5 +349,3 @@ Mitigation:
 * Backup strategies for OpenSearch
 * Multi-cluster Wazuh federation
 * UI-based policy management
-
-</PRD>

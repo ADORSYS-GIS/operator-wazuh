@@ -190,7 +190,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                 match_labels: Some(labels.clone()),
                 ..Default::default()
             },
-            service_name: name.clone(),
+            service_name: Some(name.clone()),
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),

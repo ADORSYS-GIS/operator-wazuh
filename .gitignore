@@ -28,3 +28,5 @@ config.json
 # Task files
 tasks.json
 tasks/ 
+
+crds
