@@ -68,6 +68,19 @@ pub async fn reconcile(indexer: Arc<WazuhIndexerCluster>, ctx: Arc<IndexerContex
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
+async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<bool> {
+    let ns = indexer.namespace().unwrap();
+    let name = indexer.name_any();
+    let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
+
+    let sts = sts_api.get(&name).await?;
+    let ready_replicas = sts.status.as_ref().and_then(|s| s.ready_replicas).unwrap_or(0);
+    
+    // Simple quorum check: at least half + 1 nodes must be ready
+    let quorum = (indexer.spec.replicas / 2) + 1;
+    Ok(ready_replicas >= quorum)
+}
+
 async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<()> {
     let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
@@ -178,6 +191,34 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                             "wazuh/wazuh-indexer:{}",
                             indexer.spec.version
                         )),
+                        env: Some(vec![
+                            k8s_openapi::api::core::v1::EnvVar {
+                                name: "cluster.name".to_string(),
+                                value: Some(name.clone()),
+                                ..Default::default()
+                            },
+                            k8s_openapi::api::core::v1::EnvVar {
+                                name: "node.name".to_string(),
+                                value_from: Some(k8s_openapi::api::core::v1::EnvVarSource {
+                                    field_ref: Some(k8s_openapi::api::core::v1::ObjectFieldSelector {
+                                        field_path: "metadata.name".to_string(),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            },
+                            k8s_openapi::api::core::v1::EnvVar {
+                                name: "discovery.seed_hosts".to_string(),
+                                value: Some(format!("{}-headless", name)),
+                                ..Default::default()
+                            },
+                            k8s_openapi::api::core::v1::EnvVar {
+                                name: "cluster.initial_master_nodes".to_string(),
+                                value: Some((0..indexer.spec.replicas).map(|i| format!("{}-{}", name, i)).collect::<Vec<_>>().join(",")),
+                                ..Default::default()
+                            },
+                        ]),
                         volume_mounts: Some(vec![VolumeMount {
                             name: "indexer-data".to_string(),
                             mount_path: "/var/lib/wazuh-indexer".to_string(),

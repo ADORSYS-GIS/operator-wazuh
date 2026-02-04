@@ -10,6 +10,8 @@ pub mod error;
 pub mod controller;
 pub mod client;
 pub mod indexer_controller;
+pub mod manager_controller;
+pub mod dashboard_controller;
 pub mod tls;
 
 pub use error::{Error, Result};
