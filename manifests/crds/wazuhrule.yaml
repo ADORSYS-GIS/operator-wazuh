@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhrules.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhRule
+    plural: wazuhrules
+    shortNames: []
+    singular: wazuhrule
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhRuleSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              content:
+                description: XML content of the rule
+                type: string
+              filename:
+                description: Filename for the rule (e.g., "local_rules.xml")
+                type: string
+              priority:
+                description: Priority for ordering rules
+                format: int32
+                nullable: true
+                type: integer
+            required:
+            - content
+            - filename
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                description: Whether the rule has been applied
+                type: boolean
+              error:
+                description: Error message if application failed
+                nullable: true
+                type: string
+              hash:
+                description: Hash of the content
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhRule
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

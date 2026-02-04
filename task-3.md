@@ -149,7 +149,7 @@ CRD: `WazuhAgentGroup`
 * **operator-crds**: Schema + OpenAPI definitions
 * **operator-core**: Reconciliation controllers
 * **operator-api**: OpenSearch + Wazuh API clients
-* **operator-web**: Axum admission webhook + health endpoints
+* **operator-web**: Axum admission webhook + health endpoints for the operator
 * **operator-cli**: Clap-based debugging/admin tool
 
 ---

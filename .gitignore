@@ -24,9 +24,3 @@ node_modules/
 
 mcp.json
 config.json
-
-# Task files
-tasks.json
-tasks/ 
-
-crds

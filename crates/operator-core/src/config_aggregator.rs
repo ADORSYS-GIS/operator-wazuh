@@ -2,13 +2,53 @@
 
 use crate::error::Result;
 use kube::api::{Api, ListParams};
-use operator_crds::{WazuhDecoder, WazuhRule};
+use operator_crds::{WazuhConfig, WazuhDecoder, WazuhRule};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub struct ConfigAggregator;
 
 impl ConfigAggregator {
+    /// Aggregate all WazuhConfigs and WazuhListeners in a namespace into a single ossec.conf content
+    pub async fn aggregate_configs(client: kube::Client, namespace: &str) -> Result<String> {
+        let config_api: Api<WazuhConfig> = Api::namespaced(client.clone(), namespace);
+        let configs = config_api.list(&ListParams::default()).await?;
+
+        let mut content = configs
+            .iter()
+            .map(|c| c.spec.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        // Aggregate listeners
+        let listener_api: Api<operator_crds::WazuhListener> = Api::namespaced(client, namespace);
+        let listeners = listener_api.list(&ListParams::default()).await?;
+
+        if !listeners.items.is_empty() {
+            content.push_str("\n\n<!-- Dynamic Listeners -->\n");
+            for listener in listeners.items {
+                let remote = format!(
+                    r#"<remote>
+  <connection>{}</connection>
+  <port>{}</port>
+  <protocol>{}</protocol>
+</remote>"#,
+                    if listener.spec.protocol.to_uppercase() == "UDP" {
+                        "syslog"
+                    } else {
+                        "secure"
+                    },
+                    listener.spec.port,
+                    listener.spec.protocol.to_lowercase()
+                );
+                content.push_str(&remote);
+                content.push('\n');
+            }
+        }
+
+        Ok(content)
+    }
+
     /// Aggregate all WazuhRules in a namespace into a map of filename -> content
     pub async fn aggregate_rules(
         client: kube::Client,

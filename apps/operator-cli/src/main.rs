@@ -8,6 +8,12 @@
 
 use anyhow::Result;
 use clap::Parser;
+use futures::join;
+use operator_core::{
+    config_controller, dashboard_controller, indexer_controller, listener_controller,
+    manager_controller, rule_controller, security_controller, WazuhController,
+};
+use tracing::info;
 
 #[derive(Parser)]
 #[command(name = "wazuh-operator")]
@@ -51,8 +57,54 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { namespace } => {
-            println!("Starting Wazuh operator in namespace: {}", namespace);
-            // TODO: Implement operator runtime
+            tracing_subscriber::fmt::init();
+            info!("Starting Wazuh operator in namespace: {}", namespace);
+
+            let client = kube::Client::try_default().await?;
+            let context = operator_core::controller::ControllerContext::new(client.clone());
+
+            let indexer_controller = WazuhController::<operator_crds::WazuhIndexerCluster>::new(context.clone());
+            let manager_controller = WazuhController::<operator_crds::WazuhManagerCluster>::new(context.clone());
+            let dashboard_controller = WazuhController::<operator_crds::WazuhDashboard>::new(context.clone());
+            let config_controller = WazuhController::<operator_crds::WazuhConfig>::new(context.clone());
+            let rule_controller = WazuhController::<operator_crds::WazuhRule>::new(context.clone());
+            let listener_controller = WazuhController::<operator_crds::WazuhListener>::new(context.clone());
+            let security_controller = WazuhController::<operator_crds::WazuhIndexerSecurity>::new(context.clone());
+
+            let namespace_opt = if namespace == "all" {
+                None
+            } else {
+                Some(namespace.as_str())
+            };
+
+            info!("Initializing all controllers...");
+
+            let (
+                indexer_res,
+                manager_res,
+                dashboard_res,
+                config_res,
+                rule_res,
+                listener_res,
+                security_res,
+            ) = join!(
+                indexer_controller.run(namespace_opt),
+                manager_controller.run(namespace_opt),
+                dashboard_controller.run(namespace_opt),
+                config_controller.run(namespace_opt),
+                rule_controller.run(namespace_opt),
+                listener_controller.run(namespace_opt),
+                security_controller.run(namespace_opt),
+            );
+
+            indexer_res?;
+            manager_res?;
+            dashboard_res?;
+            config_res?;
+            rule_res?;
+            listener_res?;
+            security_res?;
+
             Ok(())
         }
         Commands::GenerateCrd { output_dir } => {

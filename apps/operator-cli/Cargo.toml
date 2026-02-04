@@ -24,3 +24,4 @@ operator-core = { workspace = true }
 operator-crds = { workspace = true }
 operator-api = { workspace = true }
 serde_yaml = { workspace = true }
+futures = { workspace = true }

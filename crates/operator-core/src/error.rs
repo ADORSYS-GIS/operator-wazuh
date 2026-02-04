@@ -29,4 +29,7 @@ pub enum Error {
 
     #[error("Reconciliation error: {0}")]
     ReconciliationError(String),
+
+    #[error("API error: {0}")]
+    ApiError(#[from] reqwest::Error),
 }

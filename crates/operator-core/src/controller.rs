@@ -7,6 +7,7 @@ use kube::runtime::watcher::Config;
 use std::sync::Arc;
 use tracing::info;
 
+#[derive(Clone)]
 pub struct ControllerContext {
     pub client: kube::Client,
 }

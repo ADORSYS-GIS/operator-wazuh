@@ -1,0 +1,133 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhdashboards.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhDashboard
+    plural: wazuhdashboards
+    shortNames: []
+    singular: wazuhdashboard
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhDashboardSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              auth:
+                description: Authentication configuration
+                nullable: true
+                properties:
+                  auth_secret:
+                    description: Authentication secret
+                    nullable: true
+                    type: string
+                  auth_type:
+                    description: Authentication type (basic, oauth, etc.)
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable authentication
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              indexer_cluster:
+                description: Reference to indexer cluster
+                properties:
+                  name:
+                    description: Name of the indexer cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the indexer cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              manager_cluster:
+                description: Reference to manager cluster
+                nullable: true
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              replicas:
+                description: Number of dashboard replicas
+                format: int32
+                type: integer
+              service:
+                description: Service configuration
+                properties:
+                  node_port:
+                    description: Node port (for NodePort service)
+                    format: int32
+                    nullable: true
+                    type: integer
+                  port:
+                    description: Service port
+                    format: int32
+                    nullable: true
+                    type: integer
+                  service_type:
+                    description: Service type (NodePort, LoadBalancer, ClusterIP)
+                    type: string
+                required:
+                - service_type
+                type: object
+              version:
+                description: Wazuh dashboard version
+                type: string
+            required:
+            - indexer_cluster
+            - replicas
+            - service
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              indexer_connected:
+                description: Connection status to indexer
+                type: boolean
+              manager_connected:
+                description: Connection status to manager
+                nullable: true
+                type: boolean
+              phase:
+                description: Current status of the dashboard
+                type: string
+              ready_replicas:
+                description: Number of ready replicas
+                format: int32
+                type: integer
+              url:
+                description: Dashboard URL
+                nullable: true
+                type: string
+            required:
+            - indexer_connected
+            - phase
+            - ready_replicas
+            type: object
+        required:
+        - spec
+        title: WazuhDashboard
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
