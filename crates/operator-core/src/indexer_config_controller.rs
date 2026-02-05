@@ -100,7 +100,7 @@ async fn reconcile_config(
 
 
     // 5. Ensure CronJob
-    ensure_cronjob(&config, &cluster, &cm_name, client.clone()).await?;
+    ensure_cronjob(&config, &cluster, &cm_name, &hash, client.clone()).await?;
 
     // 6. Update Status
     let status = WazuhIndexerConfigStatus {
@@ -144,33 +144,71 @@ fn generate_configmap(
     let mut data = BTreeMap::new();
 
     if let Some(roles) = &config.spec.roles {
+        let value = with_security_meta(
+            serde_yaml::to_value(roles)
+                .map_err(|e| Error::ValidationError(format!("Failed to encode roles: {}", e)))?,
+            "roles",
+        );
         data.insert(
             "roles.yml".to_string(),
-            serde_yaml::to_string(roles).unwrap(),
+            serde_yaml::to_string(&value).map_err(|e| {
+                Error::ValidationError(format!("Failed to render roles.yml: {}", e))
+            })?,
         );
     }
     if let Some(roles_mapping) = &config.spec.roles_mapping {
+        let value = with_security_meta(
+            serde_yaml::to_value(roles_mapping).map_err(|e| {
+                Error::ValidationError(format!("Failed to encode roles_mapping: {}", e))
+            })?,
+            "rolesmapping",
+        );
         data.insert(
             "roles_mapping.yml".to_string(),
-            serde_yaml::to_string(roles_mapping).unwrap(),
+            serde_yaml::to_string(&value).map_err(|e| {
+                Error::ValidationError(format!("Failed to render roles_mapping.yml: {}", e))
+            })?,
         );
     }
     if let Some(tenants) = &config.spec.tenants {
+        let value = with_security_meta(
+            serde_yaml::to_value(tenants)
+                .map_err(|e| Error::ValidationError(format!("Failed to encode tenants: {}", e)))?,
+            "tenants",
+        );
         data.insert(
             "tenants.yml".to_string(),
-            serde_yaml::to_string(tenants).unwrap(),
+            serde_yaml::to_string(&value).map_err(|e| {
+                Error::ValidationError(format!("Failed to render tenants.yml: {}", e))
+            })?,
         );
     }
     if let Some(internal_users) = internal_users.as_ref().or(config.spec.internal_users.as_ref()) {
+        let value = with_security_meta(
+            serde_yaml::to_value(internal_users).map_err(|e| {
+                Error::ValidationError(format!("Failed to encode internal_users: {}", e))
+            })?,
+            "internalusers",
+        );
         data.insert(
             "internal_users.yml".to_string(),
-            serde_yaml::to_string(internal_users).unwrap(),
+            serde_yaml::to_string(&value).map_err(|e| {
+                Error::ValidationError(format!("Failed to render internal_users.yml: {}", e))
+            })?,
         );
     }
     if let Some(action_groups) = &config.spec.action_groups {
+        let value = with_security_meta(
+            serde_yaml::to_value(action_groups).map_err(|e| {
+                Error::ValidationError(format!("Failed to encode action_groups: {}", e))
+            })?,
+            "actiongroups",
+        );
         data.insert(
             "action_groups.yml".to_string(),
-            serde_yaml::to_string(action_groups).unwrap(),
+            serde_yaml::to_string(&value).map_err(|e| {
+                Error::ValidationError(format!("Failed to render action_groups.yml: {}", e))
+            })?,
         );
     }
 
@@ -206,6 +244,30 @@ fn generate_configmap(
         data: Some(data),
         ..Default::default()
     })
+}
+
+fn with_security_meta(mut doc: serde_yaml::Value, doc_type: &str) -> serde_yaml::Value {
+    let Some(map) = doc.as_mapping_mut() else {
+        return doc;
+    };
+    if map.contains_key(serde_yaml::Value::String("_meta".to_string())) {
+        return doc;
+    }
+
+    let mut meta = serde_yaml::Mapping::new();
+    meta.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String(doc_type.to_string()),
+    );
+    meta.insert(
+        serde_yaml::Value::String("config_version".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(2)),
+    );
+    map.insert(
+        serde_yaml::Value::String("_meta".to_string()),
+        serde_yaml::Value::Mapping(meta),
+    );
+    doc
 }
 
 async fn resolve_internal_users(
@@ -278,6 +340,7 @@ async fn ensure_cronjob(
     config: &WazuhIndexerConfig,
     cluster: &WazuhIndexerCluster,
     cm_name: &str,
+    hash: &str,
     client: kube::Client,
 ) -> Result<()> {
     let ns = config.namespace().unwrap();
@@ -287,20 +350,15 @@ async fn ensure_cronjob(
         let cronjob_name = format!("{}-cronjob", name);
         let cronjob_api: Api<CronJob> = Api::namespaced(client, &ns);
 
-        let cronjob = cronjob_api.get(&cronjob_name).await;
-
-        if cronjob.is_err() {
-            let hash = calculate_hash(&BTreeMap::new()); // We need to calculate the hash of the configmap
-            let new_cronjob =
-                generate_cronjob(config, cluster, &cronjob_name, cm_name, &hash, schedule)?;
-            cronjob_api
-                .patch(
-                    &cronjob_name,
-                    &PatchParams::apply("wazuh-operator"),
-                    &Patch::Apply(&new_cronjob),
-                )
-                .await?;
-        }
+        let new_cronjob =
+            generate_cronjob(config, cluster, &cronjob_name, cm_name, hash, schedule)?;
+        cronjob_api
+            .patch(
+                &cronjob_name,
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&new_cronjob),
+            )
+            .await?;
     }
     Ok(())
 }
@@ -343,14 +401,28 @@ fn generate_cronjob(
                         "/bin/bash".to_string(),
                         "-c".to_string(),
                         format!(
-                            "/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
-                            -cd /etc/wazuh-indexer/security-config/ \
-                            -p 9200 \
-                            -icl -nhnv \
-                            -cacert /usr/share/wazuh-indexer/config/certs/ca.crt \
-                            -cert /usr/share/wazuh-indexer/config/admin-certs/tls.crt \
-                            -key /usr/share/wazuh-indexer/config/admin-certs/tls.key \
-                            -h {}.{}.svc.cluster.local",
+                            "set -euo pipefail\n\
+                            HOST={}.{}.svc.cluster.local\n\
+                            TOOL=/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh\n\
+                            BASE_ARGS='-p 9200 -icl -nhnv -cacert /usr/share/wazuh-indexer/config/certs/ca.crt -cert /usr/share/wazuh-indexer/config/admin-certs/tls.crt -key /usr/share/wazuh-indexer/config/admin-certs/tls.key -h '\n\
+                            run_cfg() {{\n\
+                              local file=\"$1\"\n\
+                              local t=\"$2\"\n\
+                              if [ -f \"$file\" ]; then\n\
+                                echo \"Applying ${{file}} as ${{t}}\"\n\
+                                $TOOL -f \"$file\" -t \"$t\" $BASE_ARGS\"$HOST\"\n\
+                              fi\n\
+                            }}\n\
+                            run_cfg /etc/wazuh-indexer/security-config/config.yml config\n\
+                            run_cfg /etc/wazuh-indexer/security-config/roles.yml roles\n\
+                            run_cfg /etc/wazuh-indexer/security-config/roles_mapping.yml rolesmapping\n\
+                            run_cfg /etc/wazuh-indexer/security-config/internal_users.yml internalusers\n\
+                            run_cfg /etc/wazuh-indexer/security-config/action_groups.yml actiongroups\n\
+                            run_cfg /etc/wazuh-indexer/security-config/tenants.yml tenants\n\
+                            run_cfg /etc/wazuh-indexer/security-config/nodes_dn.yml nodesdn\n\
+                            run_cfg /etc/wazuh-indexer/security-config/whitelist.yml whitelist\n\
+                            run_cfg /etc/wazuh-indexer/security-config/allowlist.yml allowlist\n\
+                            echo 'Security config apply completed'",
                             cluster_name, ns
                         ),
                     ]),

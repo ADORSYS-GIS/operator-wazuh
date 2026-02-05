@@ -23,6 +23,9 @@ pub struct WazuhRuleSpec {
     pub priority: Option<i32>,
     /// Selector to target specific manager nodes/clusters
     pub node_selector: Option<BTreeMap<String, String>>,
+    /// Multiple selectors (OR). Any matching selector applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selectors: Option<Vec<BTreeMap<String, String>>>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

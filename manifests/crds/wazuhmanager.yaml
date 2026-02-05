@@ -94,14 +94,22 @@ spec:
                   spec:
                     nullable: true
                     properties:
-                      affinity: {}
+                      affinity:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
                       dns_policy:
                         nullable: true
                         type: string
                       host_network:
                         nullable: true
                         type: boolean
-                      image_pull_secrets: {}
+                      image_pull_secrets:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
                       node_selector:
                         additionalProperties:
                           type: string
@@ -110,11 +118,19 @@ spec:
                       priority_class_name:
                         nullable: true
                         type: string
-                      security_context: {}
+                      security_context:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
                       service_account_name:
                         nullable: true
                         type: string
-                      tolerations: {}
+                      tolerations:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
                     type: object
                 type: object
               replicas:
@@ -149,7 +165,9 @@ spec:
                       - name
                       type: object
                     spec:
+                      additionalProperties: true
                       description: PVC spec (PersistentVolumeClaimSpec)
+                      type: object
                   required:
                   - metadata
                   - spec

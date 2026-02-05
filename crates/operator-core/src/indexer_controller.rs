@@ -498,6 +498,7 @@ plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/confi
 plugins.security.allow_unsafe_democertificates: true
 plugins.security.authcz.admin_dn:
   - CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US
+  - C=US,L=California,O=Wazuh,OU=Wazuh,CN=admin
 plugins.security.nodes_dn:
   - "CN=*,OU=Wazuh,O=Wazuh,L=California,C=US"
 plugins.security.restapi.roles_enabled:

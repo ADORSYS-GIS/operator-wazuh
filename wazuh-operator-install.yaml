@@ -25,6 +25,10 @@ rules:
   - wazuhindexerconfigs
   - wazuhindexerbackups
   - wazuhmanagerbackups
+  - wazuhlisteners
+  - wazuhrules
+  - wazuhdecoders
+  - wazuhconfigs
   verbs:
   - get
   - list
@@ -44,6 +48,10 @@ rules:
   - wazuhindexerconfigs/status
   - wazuhindexerbackups/status
   - wazuhmanagerbackups/status
+  - wazuhlisteners/status
+  - wazuhrules/status
+  - wazuhdecoders/status
+  - wazuhconfigs/status
   verbs:
   - get
   - update

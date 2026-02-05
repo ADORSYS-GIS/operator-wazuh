@@ -25,17 +25,17 @@ pub struct PodSpecPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_selector: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tolerations: Option<serde_json::Value>,
+    pub tolerations: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub affinity: Option<serde_json::Value>,
+    pub affinity: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority_class_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_account_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_pull_secrets: Option<serde_json::Value>,
+    pub image_pull_secrets: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub security_context: Option<serde_json::Value>,
+    pub security_context: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_network: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 pub struct VolumeClaimTemplate {
     pub metadata: VolumeClaimMetadata,
     /// PVC spec (PersistentVolumeClaimSpec)
-    pub spec: serde_json::Value,
+    pub spec: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

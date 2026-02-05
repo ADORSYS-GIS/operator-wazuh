@@ -1,10 +1,11 @@
 //! WazuhManager controller implementation
 
+use crate::config_aggregator::{ConfigAggregator, ListenerPort};
 use crate::error::{Error, Result};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
-    Capabilities, ConfigMap, Container, EnvVar, EnvVarSource, ObjectFieldSelector, PodSecurityContext,
-    PodSpec, PodTemplateSpec, SecurityContext, Volume, VolumeMount,
+    Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
+    PodSecurityContext, PodSpec, PodTemplateSpec, SecurityContext, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::api::{Api, Patch, PatchParams, Resource};
@@ -84,9 +85,38 @@ async fn reconcile_manager(
     // 3. Build master nodes list
     let master_nodes = collect_master_nodes(client.clone(), &cluster_name, &cluster_ns).await?;
 
-    // 4. Generate ConfigMaps
+    // 4. Aggregate configs/rules/decoders/listeners for this manager
+    let selector_labels = build_selector_labels(&manager, &cluster_name, &workload_name);
+    let extra_config =
+        ConfigAggregator::aggregate_configs(client.clone(), &ns, Some(&selector_labels)).await?;
+    let mut rules =
+        ConfigAggregator::aggregate_rules(client.clone(), &ns, Some(&selector_labels)).await?;
+    let mut decoders =
+        ConfigAggregator::aggregate_decoders(client.clone(), &ns, Some(&selector_labels)).await?;
+    let listener_ports =
+        ConfigAggregator::collect_listener_ports(client.clone(), &ns, Some(&selector_labels))
+            .await?;
+
+    if rules.is_empty() {
+        rules.insert(
+            "local_rules.xml".to_string(),
+            "<group name=\"local, \">\n</group>".to_string(),
+        );
+    }
+    if decoders.is_empty() {
+        decoders.insert(
+            "local_decoder.xml".to_string(),
+            "<decoder name=\"local_decoder\">\n</decoder>".to_string(),
+        );
+    }
+
+    let ossec_conf = build_ossec_conf(&manager, &indexer, &master_nodes, &extra_config)?;
+    let combined_content = format!("{}{:?}{:?}", ossec_conf, rules, decoders);
+    let config_hash = ConfigAggregator::calculate_hash(&combined_content);
+
+    // 5. Generate ConfigMaps
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
-    let cm = generate_config_map(&manager, &cluster, &indexer, &master_nodes)?;
+    let cm = generate_config_map(&manager, &cluster, &ossec_conf)?;
     cm_api
         .patch(
             &format!("{}-config", name),
@@ -95,7 +125,7 @@ async fn reconcile_manager(
         )
         .await?;
 
-    let rules_cm = generate_rules_config_map(&manager)?;
+    let rules_cm = generate_rules_config_map(&manager, rules)?;
     cm_api
         .patch(
             &format!("{}-rules", name),
@@ -104,7 +134,7 @@ async fn reconcile_manager(
         )
         .await?;
 
-    let decoders_cm = generate_decoders_config_map(&manager)?;
+    let decoders_cm = generate_decoders_config_map(&manager, decoders)?;
     cm_api
         .patch(
             &format!("{}-decoders", name),
@@ -131,7 +161,7 @@ async fn reconcile_manager(
             .await?;
     }
 
-    // 5. Create StatefulSet
+    // 6. Create StatefulSet
     let tls_secret_name = format!("{}-tls", cluster_name);
     let secret_api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), &cluster_ns);
     let tls_secret_rv = secret_api
@@ -142,7 +172,15 @@ async fn reconcile_manager(
         .unwrap_or_else(|| "missing".to_string());
 
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
-    let sts = generate_statefulset(&manager, &workload_name, &cluster, &indexer, &tls_secret_rv)?;
+    let sts = generate_statefulset(
+        &manager,
+        &workload_name,
+        &cluster,
+        &indexer,
+        &tls_secret_rv,
+        &config_hash,
+        &listener_ports,
+    )?;
     sts_api
         .patch(
             &workload_name,
@@ -245,22 +283,57 @@ async fn collect_master_nodes(
     Ok(nodes)
 }
 
-fn generate_config_map(
+fn build_selector_labels(
     manager: &WazuhManager,
-    cluster: &WazuhManagerCluster,
+    cluster_name: &str,
+    workload_name: &str,
+) -> BTreeMap<String, String> {
+    let mut labels = BTreeMap::new();
+    labels.insert("app".to_string(), "wazuh-manager".to_string());
+    labels.insert("cluster".to_string(), cluster_name.to_string());
+    labels.insert("manager".to_string(), manager.name_any());
+    labels.insert(
+        "role".to_string(),
+        match manager.spec.role {
+            WazuhManagerRole::Master => "master".to_string(),
+            WazuhManagerRole::Worker => "worker".to_string(),
+        },
+    );
+    labels.insert("workload".to_string(), workload_name.to_string());
+    if let Some(ns) = manager.namespace() {
+        labels.insert("namespace".to_string(), ns);
+    }
+    if let Some(extra) = &manager.metadata.labels {
+        for (k, v) in extra {
+            labels.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    labels
+}
+
+fn merge_ossec_conf(base: String, extra: &str) -> String {
+    let extra = extra.trim();
+    if extra.is_empty() {
+        return base;
+    }
+    if let Some(idx) = base.rfind("</ossec_config>") {
+        let (head, tail) = base.split_at(idx);
+        format!("{}\n{}\n{}", head, extra, tail)
+    } else {
+        format!("{}\n{}", base, extra)
+    }
+}
+
+fn build_ossec_conf(
+    manager: &WazuhManager,
     indexer: &WazuhIndexerCluster,
     master_nodes: &[String],
-) -> Result<ConfigMap> {
-    let name = manager.name_any();
-    let cluster_name = cluster.name_any();
-    let indexer_name = indexer.name_any();
-    let indexer_ns = indexer.namespace().unwrap();
-
+    extra_config: &str,
+) -> Result<String> {
     let node_type = match manager.spec.role {
         WazuhManagerRole::Master => "master",
         WazuhManagerRole::Worker => "worker",
     };
-
     let nodes_block = if master_nodes.is_empty() {
         "".to_string()
     } else {
@@ -270,8 +343,9 @@ fn generate_config_map(
             .collect::<Vec<_>>()
             .join("\n")
     };
-
-    let ossec_conf = format!(
+    let indexer_name = indexer.name_any();
+    let indexer_ns = indexer.namespace().unwrap_or_default();
+    let base = format!(
         r#"<ossec_config>
   <cluster>
     <name>wazuh</name>
@@ -292,14 +366,22 @@ fn generate_config_map(
     </hosts>
   </indexer>
 </ossec_config>"#,
-        node_type,
-        nodes_block,
-        indexer_name,
-        indexer_ns
+        node_type, nodes_block, indexer_name, indexer_ns
     );
 
+    Ok(merge_ossec_conf(base, extra_config))
+}
+
+fn generate_config_map(
+    manager: &WazuhManager,
+    cluster: &WazuhManagerCluster,
+    ossec_conf: &str,
+) -> Result<ConfigMap> {
+    let name = manager.name_any();
+    let cluster_name = cluster.name_any();
+
     let mut data = BTreeMap::new();
-    data.insert("ossec.conf".to_string(), ossec_conf);
+    data.insert("ossec.conf".to_string(), ossec_conf.to_string());
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -336,13 +418,11 @@ fn generate_config_map(
     })
 }
 
-fn generate_rules_config_map(manager: &WazuhManager) -> Result<ConfigMap> {
+fn generate_rules_config_map(
+    manager: &WazuhManager,
+    rules: BTreeMap<String, String>,
+) -> Result<ConfigMap> {
     let name = manager.name_any();
-    let mut data = BTreeMap::new();
-    data.insert(
-        "local_rules.xml".to_string(),
-        "<group name=\"local, \">\n</group>".to_string(),
-    );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -352,18 +432,16 @@ fn generate_rules_config_map(manager: &WazuhManager) -> Result<ConfigMap> {
             owner_references: owner_ref,
             ..Default::default()
         },
-        data: Some(data),
+        data: Some(rules),
         ..Default::default()
     })
 }
 
-fn generate_decoders_config_map(manager: &WazuhManager) -> Result<ConfigMap> {
+fn generate_decoders_config_map(
+    manager: &WazuhManager,
+    decoders: BTreeMap<String, String>,
+) -> Result<ConfigMap> {
     let name = manager.name_any();
-    let mut data = BTreeMap::new();
-    data.insert(
-        "local_decoder.xml".to_string(),
-        "<decoder name=\"local_decoder\">\n</decoder>".to_string(),
-    );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -373,7 +451,7 @@ fn generate_decoders_config_map(manager: &WazuhManager) -> Result<ConfigMap> {
             owner_references: owner_ref,
             ..Default::default()
         },
-        data: Some(data),
+        data: Some(decoders),
         ..Default::default()
     })
 }
@@ -448,6 +526,8 @@ fn generate_statefulset(
     cluster: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
     tls_secret_rv: &str,
+    config_hash: &str,
+    listener_ports: &[ListenerPort],
 ) -> Result<StatefulSet> {
     let name = manager.name_any();
     let cluster_name = cluster.name_any();
@@ -468,6 +548,10 @@ fn generate_statefulset(
     labels.insert("cluster".to_string(), cluster_name.clone());
     labels.insert("manager".to_string(), name.clone());
     labels.insert("role".to_string(), role_label.to_string());
+    labels.insert("workload".to_string(), workload_name.to_string());
+    if let Some(ns) = manager.namespace() {
+        labels.insert("namespace".to_string(), ns);
+    }
     labels.insert(
         "app.kubernetes.io/managed-by".to_string(),
         "wazuh-operator".to_string(),
@@ -486,9 +570,26 @@ fn generate_statefulset(
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut manager_ports = Vec::new();
+    for entry in listener_ports {
+        let proto = entry.protocol.to_lowercase();
+        let name = format!("lst-{}-{}", entry.port, proto);
+        manager_ports.push(ContainerPort {
+            container_port: entry.port,
+            name: Some(name.chars().take(15).collect()),
+            protocol: Some(proto.to_uppercase()),
+            ..Default::default()
+        });
+    }
+
     let mut containers = vec![Container {
         name: "manager".to_string(),
         image: Some(format!("wazuh/wazuh-manager:{}", cluster.spec.version)),
+        ports: if manager_ports.is_empty() {
+            None
+        } else {
+            Some(manager_ports)
+        },
         env: Some(vec![
             EnvVar {
                 name: "INDEXER_URL".to_string(),
@@ -690,6 +791,10 @@ fn generate_statefulset(
                             ann.insert(
                                 "wazuh.adorsys.team/tls-secret-rv".to_string(),
                                 tls_secret_rv.to_string(),
+                            );
+                            ann.insert(
+                                "wazuh.adorsys.team/config-hash".to_string(),
+                                config_hash.to_string(),
                             );
                             ann
                         }),

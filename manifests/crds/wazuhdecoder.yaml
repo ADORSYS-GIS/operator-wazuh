@@ -37,6 +37,14 @@ spec:
                 format: int32
                 nullable: true
                 type: integer
+              selectors:
+                description: Multiple selectors (OR). Any matching selector applies.
+                items:
+                  additionalProperties:
+                    type: string
+                  type: object
+                nullable: true
+                type: array
             required:
             - content
             - filename

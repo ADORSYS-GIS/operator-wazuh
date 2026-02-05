@@ -38,7 +38,7 @@ pub use wazuh_indexer_config::{
 pub use wazuh_indexer_index_template::WazuhIndexerIndexTemplate;
 pub use wazuh_indexer_security::WazuhIndexerSecurity;
 pub use wazuh_indexer_user::WazuhIndexerUser;
-pub use wazuh_listener::WazuhListener;
+pub use wazuh_listener::{ListenerServiceConfig, ListenerServiceMode, WazuhListener};
 pub use wazuh_manager_backup::WazuhManagerBackup;
 pub use wazuh_manager::{
     ImageConfig as ManagerImageConfig, WazuhManager, WazuhManagerClusterRef, WazuhManagerRole,

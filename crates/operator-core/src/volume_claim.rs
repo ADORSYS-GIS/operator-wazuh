@@ -5,7 +5,14 @@ use k8s_openapi::api::core::v1::{PersistentVolumeClaim, PersistentVolumeClaimSpe
 use operator_crds::VolumeClaimTemplate;
 
 pub fn pvc_from_template(tmpl: &VolumeClaimTemplate) -> Result<PersistentVolumeClaim> {
-    let spec: PersistentVolumeClaimSpec = serde_json::from_value(tmpl.spec.clone()).map_err(|e| {
+    let spec_value = serde_json::to_value(&tmpl.spec).map_err(|e| {
+        Error::ValidationError(format!(
+            "Invalid volume claim spec for {}: {}",
+            tmpl.metadata.name, e
+        ))
+    })?;
+
+    let spec: PersistentVolumeClaimSpec = serde_json::from_value(spec_value).map_err(|e| {
         Error::ValidationError(format!(
             "Invalid volume claim spec for {}: {}",
             tmpl.metadata.name, e

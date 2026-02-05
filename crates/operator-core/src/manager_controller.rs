@@ -14,7 +14,9 @@ use kube::ResourceExt;
 use kube::api::{Api, ListParams, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
-use operator_crds::{WazuhIndexerCluster, WazuhManager, WazuhManagerCluster};
+use operator_crds::{
+    ListenerServiceMode, WazuhIndexerCluster, WazuhListener, WazuhManager, WazuhManagerCluster,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -288,8 +290,12 @@ async fn reconcile_manager(
     }
 
     // 4. Create Services
+    let listener_api: Api<WazuhListener> = Api::namespaced(client.clone(), &ns);
+    let listeners = listener_api.list(&ListParams::default()).await?;
+    let extra_ports = collect_attached_listener_service_ports(&listeners, &name, &ns);
+
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
-    let svc = generate_manager_service(&manager)?;
+    let svc = generate_manager_service(&manager, &extra_ports)?;
 
     svc_api
         .patch(
@@ -682,7 +688,10 @@ fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> 
     })
 }
 
-fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
+fn generate_manager_service(
+    manager: &WazuhManagerCluster,
+    extra_ports: &[ServicePort],
+) -> Result<Service> {
     let name = manager.name_any();
     let nginx_enabled = manager
         .spec
@@ -708,6 +717,33 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
+    let mut ports = vec![
+        ServicePort {
+            name: Some("agent-auth".to_string()),
+            port: 1515,
+            ..Default::default()
+        },
+        ServicePort {
+            name: Some("agent-conn".to_string()),
+            port: 1514,
+            ..Default::default()
+        },
+        ServicePort {
+            name: Some("api".to_string()),
+            port: api_port,
+            target_port: Some(
+                k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(api_port),
+            ),
+            ..Default::default()
+        },
+    ];
+    for p in extra_ports {
+        if ports.iter().any(|existing| existing.port == p.port) {
+            continue;
+        }
+        ports.push(p.clone());
+    }
+
     Ok(Service {
         metadata: kube::api::ObjectMeta {
             name: Some(name.clone()),
@@ -718,31 +754,67 @@ fn generate_manager_service(manager: &WazuhManagerCluster) -> Result<Service> {
         },
         spec: Some(ServiceSpec {
             selector: Some(labels),
-            ports: Some(vec![
-                ServicePort {
-                    name: Some("agent-auth".to_string()),
-                    port: 1515,
-                    ..Default::default()
-                },
-                ServicePort {
-                    name: Some("agent-conn".to_string()),
-                    port: 1514,
-                    ..Default::default()
-                },
-                ServicePort {
-                    name: Some("api".to_string()),
-                    port: api_port,
-                    target_port: Some(
-                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(api_port),
-                    ),
-                    ..Default::default()
-                },
-            ]),
+            ports: Some(ports),
             type_: Some("ClusterIP".to_string()),
             ..Default::default()
         }),
         ..Default::default()
     })
+}
+
+fn collect_attached_listener_service_ports(
+    listeners: &kube::api::ObjectList<WazuhListener>,
+    cluster_name: &str,
+    namespace: &str,
+) -> Vec<ServicePort> {
+    let mut ports = Vec::new();
+
+    for listener in listeners.items.iter() {
+        let mode = listener
+            .spec
+            .service
+            .as_ref()
+            .and_then(|s| s.mode.clone())
+            .unwrap_or(ListenerServiceMode::Attach);
+        if !matches!(mode, ListenerServiceMode::Attach) {
+            continue;
+        }
+        let mref = match listener.spec.manager_cluster.as_ref() {
+            Some(r) => r,
+            None => continue,
+        };
+        let ref_ns = mref
+            .namespace
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or(namespace);
+        if mref.name != cluster_name || ref_ns != namespace {
+            continue;
+        }
+        // Attach mode is cluster-wide; use create mode for per-workload selectors.
+        if listener.spec.node_selector.is_some()
+            || listener
+                .spec
+                .selectors
+                .as_ref()
+                .map_or(false, |s| !s.is_empty())
+        {
+            continue;
+        }
+
+        let proto = listener.spec.protocol.to_uppercase();
+        let port_name = format!("lst-{}-{}", listener.spec.port, proto.to_lowercase());
+        ports.push(ServicePort {
+            name: Some(port_name.chars().take(15).collect()),
+            port: listener.spec.port,
+            protocol: Some(proto),
+            ..Default::default()
+        });
+    }
+
+    ports.sort_by(|a, b| a.port.cmp(&b.port));
+    ports.dedup_by(|a, b| a.port == b.port);
+    ports
 }
 
 fn generate_manager_headless_service(manager: &WazuhManagerCluster) -> Result<Service> {
