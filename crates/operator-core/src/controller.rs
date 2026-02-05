@@ -232,6 +232,92 @@ impl WazuhController<operator_crds::WazuhDashboard> {
         Ok(())
     }
 }
+
+impl WazuhController<operator_crds::WazuhCA> {
+    pub async fn run(&self, namespace: Option<&str>) -> Result<()> {
+        info!("Starting WazuhCA controller");
+
+        let client = self.context.client.clone();
+        let api: Api<operator_crds::WazuhCA> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let secret_api: Api<Secret> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+
+        let ctx = Arc::new(crate::wazuh_ca_controller::WazuhCaContext::new(
+            client.clone(),
+        ));
+
+        Controller::new(api, Config::default())
+            .owns(secret_api, Config::default())
+            .shutdown_on_signal()
+            .run(
+                crate::wazuh_ca_controller::reconcile,
+                crate::wazuh_ca_controller::error_policy,
+                ctx,
+            )
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!("Reconciled {:?}", o),
+                    Err(e) => error!("Reconcile failed: {:?}", e),
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+}
+
+impl WazuhController<operator_crds::WazuhManager> {
+    pub async fn run(&self, namespace: Option<&str>) -> Result<()> {
+        info!("Starting WazuhManager controller");
+
+        let client = self.context.client.clone();
+        let api: Api<operator_crds::WazuhManager> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let sts_api: Api<StatefulSet> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let cm_api: Api<ConfigMap> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+
+        let ctx = Arc::new(crate::wazuh_manager_controller::WazuhManagerContext::new(
+            client.clone(),
+        ));
+
+        Controller::new(api, Config::default())
+            .owns(sts_api, Config::default())
+            .owns(cm_api, Config::default())
+            .shutdown_on_signal()
+            .run(
+                crate::wazuh_manager_controller::reconcile,
+                crate::wazuh_manager_controller::error_policy,
+                ctx,
+            )
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!("Reconciled {:?}", o),
+                    Err(e) => error!("Reconcile failed: {:?}", e),
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+}
 impl WazuhController<operator_crds::WazuhConfig> {
     pub async fn run(&self, _namespace: Option<&str>) -> Result<()> {
         loop {

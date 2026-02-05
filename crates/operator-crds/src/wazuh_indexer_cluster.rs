@@ -4,6 +4,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::wazuh_ca::WazuhCARef;
+use crate::pod_template::PodTemplateSpecPatch;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -23,6 +24,9 @@ pub struct WazuhIndexerClusterSpec {
     pub version: String,
     /// TLS configuration
     pub tls: Option<TlsConfig>,
+    /// Pod template overrides
+    #[serde(rename = "podTemplate", default, skip_serializing_if = "Option::is_none")]
+    pub pod_template: Option<PodTemplateSpecPatch>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

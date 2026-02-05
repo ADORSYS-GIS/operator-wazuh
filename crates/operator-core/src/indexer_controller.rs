@@ -3,11 +3,13 @@
 use crate::ca::{resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
+use crate::pod_template::apply_pod_template_patch;
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, SecurityContext,
-    Service, ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
+    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSecurityContext, PodSpec,
+    PodTemplateSpec, SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount,
+    VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
@@ -302,6 +304,13 @@ async fn reconcile_indexer(
         }
     }
 
+    let tls_secret_rv = secret_api
+        .get(&tls_secret_name)
+        .await
+        .ok()
+        .and_then(|s| s.metadata.resource_version)
+        .unwrap_or_else(|| "missing".to_string());
+
     // 1. Generate and Apply ConfigMap
     let cm = generate_configmap(&indexer)?;
     cm_api
@@ -333,7 +342,7 @@ async fn reconcile_indexer(
         .await?;
 
     // 4. Generate and Apply StatefulSet
-    let sts = generate_statefulset(&indexer)?;
+    let sts = generate_statefulset(&indexer, &tls_secret_rv)?;
     sts_api
         .patch(
             &name,
@@ -589,7 +598,10 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
     Ok(svc)
 }
 
-fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
+fn generate_statefulset(
+    indexer: &WazuhIndexerCluster,
+    tls_secret_rv: &str,
+) -> Result<StatefulSet> {
     let name = indexer.name_any();
     let tls_secret_name = indexer
         .spec
@@ -628,18 +640,30 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                 ..Default::default()
             },
             service_name: Some(format!("{}-headless", name.clone())),
-            template: PodTemplateSpec {
-                metadata: Some(kube::api::ObjectMeta {
-                    labels: Some(labels),
-                    annotations: Some(annotations),
-                    ..Default::default()
-                }),
-                spec: Some(PodSpec {
-                    containers: vec![Container {
-                        name: "indexer".to_string(),
-                        image: Some(format!("wazuh/wazuh-indexer:{}", indexer.spec.version)),
-                        ports: Some(vec![
-                            ContainerPort {
+            template: {
+                let mut tpl = PodTemplateSpec {
+                    metadata: Some(kube::api::ObjectMeta {
+                        labels: Some(labels),
+                        annotations: Some({
+                            let mut pod_annotations = annotations;
+                            pod_annotations.insert(
+                                "wazuh.adorsys.team/tls-secret-rv".to_string(),
+                                tls_secret_rv.to_string(),
+                            );
+                            pod_annotations
+                        }),
+                        ..Default::default()
+                    }),
+                    spec: Some(PodSpec {
+                        security_context: Some(PodSecurityContext {
+                            fs_group: Some(101),
+                            ..Default::default()
+                        }),
+                        containers: vec![Container {
+                            name: "indexer".to_string(),
+                            image: Some(format!("wazuh/wazuh-indexer:{}", indexer.spec.version)),
+                            ports: Some(vec![
+                                ContainerPort {
                                 name: Some("http".to_string()),
                                 container_port: 9200,
                                 ..Default::default()
@@ -750,6 +774,11 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                     ]),
                     ..Default::default()
                 }),
+                };
+                if let Some(patch) = &indexer.spec.pod_template {
+                    let _ = apply_pod_template_patch(&mut tpl, patch);
+                }
+                tpl
             },
             volume_claim_templates: Some(vec![PersistentVolumeClaim {
                 metadata: kube::api::ObjectMeta {

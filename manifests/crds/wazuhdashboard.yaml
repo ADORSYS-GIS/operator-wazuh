@@ -69,11 +69,77 @@ spec:
                 description: Nginx configuration
                 nullable: true
                 properties:
+                  custom_config:
+                    description: Custom nginx.conf content
+                    nullable: true
+                    type: string
                   enabled:
                     description: Enable Nginx sidecar
                     type: boolean
+                  image:
+                    description: Nginx container image config
+                    nullable: true
+                    properties:
+                      pull_policy:
+                        description: Image pull policy
+                        nullable: true
+                        type: string
+                      repository:
+                        description: Image repository (e.g. nginx)
+                        type: string
+                      tag:
+                        description: Image tag (e.g. stable-alpine)
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
                 required:
                 - enabled
+                type: object
+              podTemplate:
+                description: Pod template overrides
+                nullable: true
+                properties:
+                  metadata:
+                    nullable: true
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                    type: object
+                  spec:
+                    nullable: true
+                    properties:
+                      affinity: {}
+                      dns_policy:
+                        nullable: true
+                        type: string
+                      host_network:
+                        nullable: true
+                        type: boolean
+                      image_pull_secrets: {}
+                      node_selector:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      priority_class_name:
+                        nullable: true
+                        type: string
+                      security_context: {}
+                      service_account_name:
+                        nullable: true
+                        type: string
+                      tolerations: {}
+                    type: object
                 type: object
               replicas:
                 description: Number of dashboard replicas

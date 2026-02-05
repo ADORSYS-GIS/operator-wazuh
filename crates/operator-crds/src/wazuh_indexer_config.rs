@@ -4,9 +4,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
+pub struct SecretKeyRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
 pub struct InternalUser {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
+    #[serde(rename = "hashSecretRef", default, skip_serializing_if = "Option::is_none")]
+    pub hash_secret_ref: Option<SecretKeyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reserved: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -17,6 +26,13 @@ pub struct InternalUser {
     pub backend_roles: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attributes: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
+pub struct IndexerClusterRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -30,7 +46,7 @@ pub struct InternalUser {
 )]
 pub struct WazuhIndexerConfigSpec {
     #[serde(rename = "wazuhIndexerClusterRef")]
-    pub wazuh_indexer_cluster_ref: String,
+    pub wazuh_indexer_cluster_ref: IndexerClusterRef,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,

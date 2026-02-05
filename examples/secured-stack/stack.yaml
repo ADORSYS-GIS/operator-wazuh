@@ -5,10 +5,12 @@ metadata:
   namespace: wazuh-test
 spec:
   replicas: 3
-  security:
-    tls:
-      enabled: true
-      secretName: indexer-tls-certs
+  version: "4.14.0"
+  storage:
+    size: "1Gi"
+  tls:
+    enabled: true
+    cert_secret: indexer-tls-certs
 ---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
@@ -16,8 +18,31 @@ metadata:
   name: wazuh-manager-secured
   namespace: wazuh-test
 spec:
+  replicas: 0
+  version: "4.14.0"
+  indexer_cluster:
+    name: wazuh-indexer-secured
+  tls:
+    enabled: true
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManager
+metadata:
+  name: wazuh-manager-secured-master
+  namespace: wazuh-test
+spec:
+  cluster_ref:
+    name: wazuh-manager-secured
   replicas: 2
-  security:
-    tls:
-      enabled: true
-      secretName: manager-tls-certs
+  role: master
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManager
+metadata:
+  name: wazuh-manager-secured-worker
+  namespace: wazuh-test
+spec:
+  cluster_ref:
+    name: wazuh-manager-secured
+  replicas: 2
+  role: worker

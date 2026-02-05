@@ -6,7 +6,7 @@ use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::api::{Api, Patch, PatchParams, Resource, ResourceExt};
 use kube::runtime::controller::Action;
-use operator_crds::{WazuhDecoder, WazuhManagerCluster, WazuhRule};
+use operator_crds::{WazuhDecoder, WazuhManager, WazuhManagerCluster, WazuhRule};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::{error, info};
@@ -148,6 +148,93 @@ pub fn decoder_error_policy(
 
 /// Shared logic to trigger aggregation and update managers
 async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
+    // Prefer WazuhManager workloads if present
+    let workload_api: Api<WazuhManager> = Api::namespaced(client.clone(), ns);
+    let workloads = workload_api.list(&kube::api::ListParams::default()).await?;
+
+    if !workloads.items.is_empty() {
+        for manager in workloads {
+            let manager_name = manager.name_any();
+
+            let ossec_conf = ConfigAggregator::aggregate_configs(
+                client.clone(),
+                ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+            let rules = ConfigAggregator::aggregate_rules(
+                client.clone(),
+                ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+            let decoders = ConfigAggregator::aggregate_decoders(
+                client.clone(),
+                ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+            let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), ns);
+
+            let rules_cm = ConfigMap {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(format!("{}-rules", manager_name)),
+                    owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
+                    ..Default::default()
+                },
+                data: Some(rules.clone()),
+                ..Default::default()
+            };
+
+            cm_api
+                .patch(
+                    &format!("{}-rules", manager_name),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&rules_cm),
+                )
+                .await?;
+
+            let decoders_cm = ConfigMap {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(format!("{}-decoders", manager_name)),
+                    owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
+                    ..Default::default()
+                },
+                data: Some(decoders.clone()),
+                ..Default::default()
+            };
+
+            cm_api
+                .patch(
+                    &format!("{}-decoders", manager_name),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&decoders_cm),
+                )
+                .await?;
+
+            let combined_content = format!("{}{:?}{:?}", ossec_conf, rules, decoders);
+            let hash = ConfigAggregator::calculate_hash(&combined_content);
+            let patch = serde_json::json!({
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "wazuh.adorsys.team/config-hash": hash
+                            }
+                        }
+                    }
+                }
+            });
+
+            let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), ns);
+            sts_api
+                .patch(&manager_name, &PatchParams::default(), &Patch::Merge(&patch))
+                .await?;
+        }
+
+        return Ok(());
+    }
+
     // 1. Find all WazuhManagerClusters in the namespace to update their ConfigMaps
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), ns);
     let managers = manager_api.list(&kube::api::ListParams::default()).await?;
@@ -156,9 +243,24 @@ async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
         let manager_name = manager.name_any();
 
         // 2. Aggregate all configs, rules, and decoders for this specific manager
-        let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), ns, &manager).await?;
-        let rules = ConfigAggregator::aggregate_rules(client.clone(), ns, &manager).await?;
-        let decoders = ConfigAggregator::aggregate_decoders(client.clone(), ns, &manager).await?;
+        let ossec_conf = ConfigAggregator::aggregate_configs(
+            client.clone(),
+            ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
+        let rules = ConfigAggregator::aggregate_rules(
+            client.clone(),
+            ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
+        let decoders = ConfigAggregator::aggregate_decoders(
+            client.clone(),
+            ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
         let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), ns);
 
         // Update rules ConfigMap

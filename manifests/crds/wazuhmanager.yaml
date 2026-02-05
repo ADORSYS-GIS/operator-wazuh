@@ -1,25 +1,74 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: wazuhindexerclusters.wazuh.adorsys.team
+  name: wazuhmanagers.wazuh.adorsys.team
 spec:
   group: wazuh.adorsys.team
   names:
     categories: []
-    kind: WazuhIndexerCluster
-    plural: wazuhindexerclusters
+    kind: WazuhManager
+    plural: wazuhmanagers
     shortNames: []
-    singular: wazuhindexercluster
+    singular: wazuhmanager
   scope: Namespaced
   versions:
   - additionalPrinterColumns: []
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Auto-generated derived type for WazuhIndexerClusterSpec via `CustomResource`
+        description: Auto-generated derived type for WazuhManagerSpec via `CustomResource`
         properties:
           spec:
             properties:
+              cluster_ref:
+                description: Reference to the WazuhManagerCluster
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              nginx:
+                description: Nginx sidecar configuration
+                nullable: true
+                properties:
+                  crl_url:
+                    description: Optional CRL URL to fetch into nginx at startup
+                    nullable: true
+                    type: string
+                  custom_config:
+                    description: Custom nginx.conf content
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable Nginx sidecar
+                    type: boolean
+                  image:
+                    description: Nginx container image config
+                    nullable: true
+                    properties:
+                      pull_policy:
+                        description: Image pull policy
+                        nullable: true
+                        type: string
+                      repository:
+                        description: Image repository (e.g. nginx)
+                        type: string
+                      tag:
+                        description: Image tag (e.g. stable-alpine)
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
+                required:
+                - enabled
+                type: object
               podTemplate:
                 description: Pod template overrides
                 nullable: true
@@ -65,81 +114,35 @@ spec:
                     type: object
                 type: object
               replicas:
-                description: Number of indexer nodes
+                description: Number of manager nodes in this workload group
                 format: int32
                 type: integer
-              storage:
-                description: Storage configuration
-                properties:
-                  size:
-                    description: Storage size (e.g., "10Gi")
-                    type: string
-                  storage_class:
-                    description: Storage class
-                    nullable: true
-                    type: string
-                required:
-                - size
-                type: object
-              tls:
-                description: TLS configuration
-                nullable: true
-                properties:
-                  ca_ref:
-                    description: Reference to shared WazuhCA
-                    nullable: true
-                    properties:
-                      name:
-                        description: Name of the WazuhCA resource
-                        type: string
-                      namespace:
-                        description: Namespace of the WazuhCA resource (defaults to the cluster namespace)
-                        nullable: true
-                        type: string
-                    required:
-                    - name
-                    type: object
-                  cert_secret:
-                    description: TLS certificate secret
-                    nullable: true
-                    type: string
-                  enabled:
-                    description: Enable TLS
-                    type: boolean
-                required:
-                - enabled
-                type: object
-              version:
-                description: Wazuh indexer version
+              role:
+                description: Node role (master or worker)
+                enum:
+                - master
+                - worker
                 type: string
             required:
+            - cluster_ref
             - replicas
-            - storage
-            - version
+            - role
             type: object
           status:
             nullable: true
             properties:
-              endpoints:
-                description: Cluster endpoints
-                items:
-                  type: string
-                type: array
               phase:
-                description: Current status of the cluster
+                nullable: true
                 type: string
-              ready_nodes:
-                description: Number of ready nodes
+              ready_replicas:
                 format: int32
                 type: integer
             required:
-            - endpoints
-            - phase
-            - ready_nodes
+            - ready_replicas
             type: object
         required:
         - spec
-        title: WazuhIndexerCluster
+        title: WazuhManager
         type: object
     served: true
     storage: true

@@ -6,15 +6,15 @@ use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Secret, Service, ServicePort,
-    ServiceSpec, VolumeMount,
+    Capabilities, ConfigMap, Container, EnvVar, Pod, PodSecurityContext, PodSpec, PodTemplateSpec,
+    Secret, SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
-use kube::api::{Api, Patch, PatchParams, Resource};
+use kube::api::{Api, ListParams, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
-use operator_crds::{WazuhIndexerCluster, WazuhManagerCluster};
+use operator_crds::{WazuhIndexerCluster, WazuhManager, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -72,6 +72,19 @@ async fn reconcile_manager(
     // 1. Resolve indexer reference
     let indexer = resolve_indexer(&manager, client.clone()).await?;
     info!("Resolved indexer: {}", indexer.name_any());
+
+    // Detect WazuhManager workloads for this cluster (new model)
+    let workload_api: Api<WazuhManager> = Api::namespaced(client.clone(), &ns);
+    let workloads = workload_api.list(&ListParams::default()).await?;
+    let has_workloads = workloads.iter().any(|workload| {
+        let ref_ns = workload
+            .spec
+            .cluster_ref
+            .namespace
+            .clone()
+            .unwrap_or_else(|| ns.clone());
+        workload.spec.cluster_ref.name == name && ref_ns == ns
+    });
 
     // 2. Ensure TLS (shared WazuhCA if configured)
     let tls_secret_name = format!("{}-tls", name);
@@ -220,57 +233,59 @@ async fn reconcile_manager(
 
     info!("Successfully reconciled Cluster Key Secret for {}", name);
 
-    // 4. Generate ossec.conf ConfigMap
+    // 4. Generate ConfigMaps (legacy path only)
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
-    let cm = generate_config_map(&manager, &indexer)?;
+    if !has_workloads {
+        let cm = generate_config_map(&manager, &indexer)?;
 
-    cm_api
-        .patch(
-            &format!("{}-config", name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&cm),
-        )
-        .await?;
-
-    // Generate rules ConfigMap
-    let rules_cm = generate_rules_config_map(&manager)?;
-    cm_api
-        .patch(
-            &format!("{}-rules", name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&rules_cm),
-        )
-        .await?;
-
-    // Generate decoders ConfigMap
-    let decoders_cm = generate_decoders_config_map(&manager)?;
-    cm_api
-        .patch(
-            &format!("{}-decoders", name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&decoders_cm),
-        )
-        .await?;
-
-    // Generate Nginx ConfigMap if enabled
-    let nginx_enabled = manager
-        .spec
-        .nginx
-        .as_ref()
-        .map(|n| n.enabled)
-        .unwrap_or(false);
-    if nginx_enabled {
-        let nginx_cm = generate_nginx_config_map(&manager)?;
         cm_api
             .patch(
-                &format!("{}-nginx-config", name),
+                &format!("{}-config", name),
                 &PatchParams::apply("wazuh-operator"),
-                &Patch::Apply(&nginx_cm),
+                &Patch::Apply(&cm),
             )
             .await?;
-    }
 
-    info!("Successfully reconciled ConfigMaps for {}", name);
+        // Generate rules ConfigMap
+        let rules_cm = generate_rules_config_map(&manager)?;
+        cm_api
+            .patch(
+                &format!("{}-rules", name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&rules_cm),
+            )
+            .await?;
+
+        // Generate decoders ConfigMap
+        let decoders_cm = generate_decoders_config_map(&manager)?;
+        cm_api
+            .patch(
+                &format!("{}-decoders", name),
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&decoders_cm),
+            )
+            .await?;
+
+        // Generate Nginx ConfigMap if enabled
+        let nginx_enabled = manager
+            .spec
+            .nginx
+            .as_ref()
+            .map(|n| n.enabled)
+            .unwrap_or(false);
+        if nginx_enabled {
+            let nginx_cm = generate_nginx_config_map(&manager)?;
+            cm_api
+                .patch(
+                    &format!("{}-nginx-config", name),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&nginx_cm),
+                )
+                .await?;
+        }
+
+        info!("Successfully reconciled ConfigMaps for {}", name);
+    }
 
     // 4. Create Services
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
@@ -298,22 +313,31 @@ async fn reconcile_manager(
 
     info!("Successfully reconciled Headless Service for {}", name);
 
-    // 6. Create StatefulSet
-    let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
-    let sts = generate_manager_statefulset(&manager, &indexer)?;
+    let tls_secret_rv = secret_api
+        .get(&tls_secret_name)
+        .await
+        .ok()
+        .and_then(|s| s.metadata.resource_version)
+        .unwrap_or_else(|| "missing".to_string());
 
-    sts_api
-        .patch(
-            &name,
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&sts),
-        )
-        .await?;
+    // 6. Create StatefulSet (legacy path only)
+    if !has_workloads {
+        let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
+        let sts = generate_manager_statefulset(&manager, &indexer, &tls_secret_rv)?;
 
-    info!("Successfully reconciled StatefulSet for {}", name);
+        sts_api
+            .patch(
+                &name,
+                &PatchParams::apply("wazuh-operator"),
+                &Patch::Apply(&sts),
+            )
+            .await?;
+
+        info!("Successfully reconciled StatefulSet for {}", name);
+    }
 
     // 7. Update status
-    update_manager_status(&manager, client).await?;
+    update_manager_status(&manager, client, has_workloads).await?;
 
     Ok(Action::requeue(Duration::from_secs(60)))
 }
@@ -329,19 +353,51 @@ async fn cleanup_manager(
     Ok(Action::await_change())
 }
 
-async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Client) -> Result<()> {
+async fn update_manager_status(
+    manager: &WazuhManagerCluster,
+    client: kube::Client,
+    has_workloads: bool,
+) -> Result<()> {
     let ns = manager.namespace().unwrap();
     let name = manager.name_any();
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), &ns);
-    let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
+    let (ready_replicas, desired_replicas) = if has_workloads {
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), &ns);
+        let selector = format!("app=wazuh-manager,cluster={}", name);
+        let pods = pod_api
+            .list(&ListParams::default().labels(&selector))
+            .await?;
+        let ready = pods.items.iter().filter(|p| pod_ready(p)).count() as i32;
 
-    let sts = sts_api.get(&name).await?;
-    let ready_replicas = sts
-        .status
-        .as_ref()
-        .and_then(|s| s.ready_replicas)
-        .unwrap_or(0);
-    let phase = if ready_replicas == manager.spec.replicas {
+        let workload_api: Api<WazuhManager> = Api::namespaced(client.clone(), &ns);
+        let workloads = workload_api.list(&ListParams::default()).await?;
+        let desired = workloads
+            .iter()
+            .filter(|workload| {
+                let ref_ns = workload
+                    .spec
+                    .cluster_ref
+                    .namespace
+                    .clone()
+                    .unwrap_or_else(|| ns.clone());
+                workload.spec.cluster_ref.name == name && ref_ns == ns
+            })
+            .map(|workload| workload.spec.replicas)
+            .sum();
+
+        (ready, desired)
+    } else {
+        let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
+        let sts = sts_api.get(&name).await?;
+        let ready = sts
+            .status
+            .as_ref()
+            .and_then(|s| s.ready_replicas)
+            .unwrap_or(0);
+        (ready, manager.spec.replicas)
+    };
+
+    let phase = if desired_replicas > 0 && ready_replicas == desired_replicas {
         "Ready"
     } else {
         "Progressing"
@@ -370,9 +426,22 @@ async fn update_manager_status(manager: &WazuhManagerCluster, client: kube::Clie
     Ok(())
 }
 
+fn pod_ready(pod: &Pod) -> bool {
+    pod.status
+        .as_ref()
+        .and_then(|status| status.conditions.as_ref())
+        .map(|conditions| {
+            conditions.iter().any(|cond| {
+                cond.type_ == "Ready" && cond.status == "True"
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn generate_manager_statefulset(
     manager: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
+    tls_secret_rv: &str,
 ) -> Result<StatefulSet> {
     let name = manager.name_any();
     let nginx_enabled = manager
@@ -422,6 +491,13 @@ fn generate_manager_statefulset(
                 ..Default::default()
             },
         ]),
+        security_context: Some(SecurityContext {
+            capabilities: Some(Capabilities {
+                add: Some(vec!["SYS_CHROOT".to_string()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
         volume_mounts: Some(vec![
             VolumeMount {
                 name: "config".to_string(),
@@ -544,14 +620,18 @@ fn generate_manager_statefulset(
                     annotations: Some({
                         let mut ann = annotations;
                         ann.insert(
-                            "wazuh.adorsys.team/config-hash".to_string(),
-                            "PLACEHOLDER_HASH".to_string(),
+                            "wazuh.adorsys.team/tls-secret-rv".to_string(),
+                            tls_secret_rv.to_string(),
                         );
                         ann
                     }),
                     ..Default::default()
                 }),
                 spec: Some(PodSpec {
+                    security_context: Some(PodSecurityContext {
+                        fs_group: Some(101),
+                        ..Default::default()
+                    }),
                     containers,
                     volumes: Some(volumes),
                     ..Default::default()

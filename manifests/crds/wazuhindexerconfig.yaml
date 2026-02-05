@@ -43,6 +43,17 @@ spec:
                     hash:
                       nullable: true
                       type: string
+                    hashSecretRef:
+                      nullable: true
+                      properties:
+                        key:
+                          nullable: true
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
                     hidden:
                       nullable: true
                       type: boolean
@@ -68,7 +79,15 @@ spec:
                 nullable: true
                 type: object
               wazuhIndexerClusterRef:
-                type: string
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - wazuhIndexerClusterRef
             type: object

@@ -19,6 +19,7 @@ rules:
   resources:
   - wazuhindexerclusters
   - wazuhmanagerclusters
+  - wazuhmanagers
   - wazuhdashboards
   - wazuhcas
   - wazuhindexerconfigs
@@ -37,6 +38,7 @@ rules:
   resources:
   - wazuhindexerclusters/status
   - wazuhmanagerclusters/status
+  - wazuhmanagers/status
   - wazuhdashboards/status
   - wazuhcas/status
   - wazuhindexerconfigs/status

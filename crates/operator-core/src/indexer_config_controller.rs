@@ -1,13 +1,14 @@
 use crate::error::{Error, Result};
 use k8s_openapi::api::batch::v1::{CronJob, CronJobSpec, JobSpec, JobTemplateSpec};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Volume, VolumeMount,
+    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Secret, Volume, VolumeMount,
 };
 use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::wazuh_indexer_config::WazuhIndexerConfigStatus;
+use operator_crds::wazuh_indexer_config::InternalUser;
 use operator_crds::{WazuhIndexerCluster, WazuhIndexerConfig};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -62,8 +63,13 @@ async fn reconcile_config(
     info!("Reconciling WazuhIndexerConfig: {}/{}", ns, name);
 
     // 1. Get the referenced WazuhIndexerCluster
-    let cluster_name = &config.spec.wazuh_indexer_cluster_ref;
-    let cluster_api: Api<WazuhIndexerCluster> = Api::namespaced(client.clone(), &ns);
+    let cluster_ref = &config.spec.wazuh_indexer_cluster_ref;
+    let cluster_ns = cluster_ref
+        .namespace
+        .clone()
+        .unwrap_or_else(|| ns.clone());
+    let cluster_api: Api<WazuhIndexerCluster> = Api::namespaced(client.clone(), &cluster_ns);
+    let cluster_name = &cluster_ref.name;
     let cluster = cluster_api.get(cluster_name).await.map_err(|e| {
         Error::ReconciliationError(format!(
             "Failed to get WazuhIndexerCluster {}: {}",
@@ -73,7 +79,13 @@ async fn reconcile_config(
 
     // 2. Generate ConfigMap
     let cm_name = format!("{}-security-config", name);
-    let cm = generate_configmap(&config, &cm_name)?;
+    let resolved_internal_users = resolve_internal_users(
+        client.clone(),
+        &ns,
+        config.spec.internal_users.as_ref(),
+    )
+    .await?;
+    let cm = generate_configmap(&config, &cm_name, resolved_internal_users)?;
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     cm_api
         .patch(
@@ -124,7 +136,11 @@ async fn cleanup_config(
     Ok(Action::await_change())
 }
 
-fn generate_configmap(config: &WazuhIndexerConfig, name: &str) -> Result<ConfigMap> {
+fn generate_configmap(
+    config: &WazuhIndexerConfig,
+    name: &str,
+    internal_users: Option<BTreeMap<String, InternalUser>>,
+) -> Result<ConfigMap> {
     let mut data = BTreeMap::new();
 
     if let Some(roles) = &config.spec.roles {
@@ -145,7 +161,7 @@ fn generate_configmap(config: &WazuhIndexerConfig, name: &str) -> Result<ConfigM
             serde_yaml::to_string(tenants).unwrap(),
         );
     }
-    if let Some(internal_users) = &config.spec.internal_users {
+    if let Some(internal_users) = internal_users.as_ref().or(config.spec.internal_users.as_ref()) {
         data.insert(
             "internal_users.yml".to_string(),
             serde_yaml::to_string(internal_users).unwrap(),
@@ -190,6 +206,62 @@ fn generate_configmap(config: &WazuhIndexerConfig, name: &str) -> Result<ConfigM
         data: Some(data),
         ..Default::default()
     })
+}
+
+async fn resolve_internal_users(
+    client: kube::Client,
+    ns: &str,
+    internal_users: Option<&BTreeMap<String, InternalUser>>,
+) -> Result<Option<BTreeMap<String, InternalUser>>> {
+    let internal_users = match internal_users {
+        Some(users) => users,
+        None => return Ok(None),
+    };
+
+    let secret_api: Api<Secret> = Api::namespaced(client, ns);
+    let mut resolved = BTreeMap::new();
+
+    for (name, user) in internal_users {
+        let mut resolved_user = user.clone();
+
+        if resolved_user.hash.is_none() {
+            if let Some(hash_ref) = resolved_user.hash_secret_ref.as_ref() {
+                let secret = secret_api.get(&hash_ref.name).await.map_err(|e| {
+                    Error::ValidationError(format!(
+                        "Failed to fetch hashSecretRef {}/{}: {}",
+                        ns, hash_ref.name, e
+                    ))
+                })?;
+                let key = hash_ref.key.as_deref().unwrap_or("hash");
+                let value = secret_value(&secret, key).ok_or_else(|| {
+                    Error::ValidationError(format!(
+                        "Secret {}/{} is missing key {}",
+                        ns, hash_ref.name, key
+                    ))
+                })?;
+                resolved_user.hash = Some(value);
+            }
+        }
+
+        resolved_user.hash_secret_ref = None;
+        resolved.insert(name.clone(), resolved_user);
+    }
+
+    Ok(Some(resolved))
+}
+
+fn secret_value(secret: &Secret, key: &str) -> Option<String> {
+    if let Some(data) = &secret.data {
+        if let Some(value) = data.get(key) {
+            return String::from_utf8(value.0.clone()).ok();
+        }
+    }
+    if let Some(data) = &secret.string_data {
+        if let Some(value) = data.get(key) {
+            return Some(value.clone());
+        }
+    }
+    None
 }
 
 fn calculate_hash(data: &BTreeMap<String, String>) -> String {

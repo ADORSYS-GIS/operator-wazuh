@@ -3,6 +3,7 @@
 use crate::ca::{resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
+use crate::pod_template::apply_pod_template_patch;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{
@@ -73,9 +74,13 @@ async fn reconcile_dashboard(
     let indexer = resolve_dashboard_indexer(&dashboard, client.clone()).await?;
     info!("Resolved indexer for dashboard: {}", indexer.name_any());
 
-    // 2. Generate opensearch_dashboards.yml ConfigMap
+    // 2. Resolve opensearch credentials for dashboard login
+    let (opensearch_user, opensearch_password) =
+        resolve_opensearch_auth(&dashboard, client.clone(), &ns).await?;
+
+    // 3. Generate opensearch_dashboards.yml ConfigMap
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
-    let cm = generate_dashboard_config_map(&dashboard, &indexer)?;
+    let cm = generate_dashboard_config_map(&dashboard, &indexer, &opensearch_user, &opensearch_password)?;
 
     cm_api
         .patch(
@@ -87,7 +92,7 @@ async fn reconcile_dashboard(
 
     info!("Successfully reconciled ConfigMap for dashboard {}", name);
 
-    // 3. Implement Wazuh API Plugin Configuration
+    // 4. Implement Wazuh API Plugin Configuration
     if let Some(_manager_ref) = &dashboard.spec.manager_cluster {
         let manager = resolve_dashboard_manager(&dashboard, client.clone()).await?;
         info!("Resolved manager for dashboard: {}", manager.name_any());
@@ -122,7 +127,7 @@ async fn reconcile_dashboard(
         );
     }
 
-    // 4. Ensure TLS (shared WazuhCA if configured)
+    // 5. Ensure TLS (shared WazuhCA if configured)
     let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns);
     let tls_secret_name = format!("{}-tls", name);
     let alt_names = vec![
@@ -275,9 +280,16 @@ async fn reconcile_dashboard(
         }
     }
 
-    // 5. Create Deployment
+    let tls_secret_rv = secret_api
+        .get(&tls_secret_name)
+        .await
+        .ok()
+        .and_then(|s| s.metadata.resource_version)
+        .unwrap_or_else(|| "missing".to_string());
+
+    // 6. Create Deployment
     let deploy_api: Api<Deployment> = Api::namespaced(client.clone(), &ns);
-    let deploy = generate_dashboard_deployment(&dashboard, &indexer)?;
+    let deploy = generate_dashboard_deployment(&dashboard, &indexer, &tls_secret_rv)?;
 
     deploy_api
         .patch(
@@ -289,7 +301,7 @@ async fn reconcile_dashboard(
 
     info!("Successfully reconciled Deployment for dashboard {}", name);
 
-    // 6. Create Service
+    // 7. Create Service
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns);
     let svc = generate_dashboard_service(&dashboard)?;
 
@@ -303,14 +315,14 @@ async fn reconcile_dashboard(
 
     info!("Successfully reconciled Service for dashboard {}", name);
 
-    // 7. Create Ingress (optional)
+    // 8. Create Ingress (optional)
     // For now, we skip ingress implementation as it's optional and requires more complex configuration
     info!(
         "Skipping optional Ingress reconciliation for dashboard {}",
         name
     );
 
-    // 8. Update status
+    // 9. Update status
     update_dashboard_status(&dashboard, client).await?;
 
     Ok(Action::requeue(Duration::from_secs(60)))
@@ -429,6 +441,7 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
 fn generate_dashboard_deployment(
     dashboard: &WazuhDashboard,
     indexer: &WazuhIndexerCluster,
+    tls_secret_rv: &str,
 ) -> Result<Deployment> {
     let name = dashboard.name_any();
     let mut labels = BTreeMap::new();
@@ -496,9 +509,24 @@ fn generate_dashboard_deployment(
     }];
 
     if nginx_enabled {
+        let nginx_image = dashboard
+            .spec
+            .nginx
+            .as_ref()
+            .and_then(|n| n.image.as_ref())
+            .map(|img| format!("{}:{}", img.repository, img.tag))
+            .unwrap_or_else(|| "nginx:stable-alpine".to_string());
+        let nginx_pull_policy = dashboard
+            .spec
+            .nginx
+            .as_ref()
+            .and_then(|n| n.image.as_ref())
+            .and_then(|img| img.pull_policy.clone());
+
         containers.push(Container {
             name: "nginx".to_string(),
-            image: Some("nginx:stable-alpine".to_string()),
+            image: Some(nginx_image),
+            image_pull_policy: nginx_pull_policy,
             ports: Some(vec![k8s_openapi::api::core::v1::ContainerPort {
                 container_port: 8443,
                 name: Some("https".to_string()),
@@ -557,15 +585,23 @@ fn generate_dashboard_deployment(
                 match_labels: Some(labels.clone()),
                 ..Default::default()
             },
-            template: PodTemplateSpec {
-                metadata: Some(kube::api::ObjectMeta {
-                    labels: Some(labels),
-                    annotations: Some(annotations),
-                    ..Default::default()
-                }),
-                spec: Some(PodSpec {
-                    containers,
-                    volumes: Some(vec![
+            template: {
+                let mut tpl = PodTemplateSpec {
+                    metadata: Some(kube::api::ObjectMeta {
+                        labels: Some(labels),
+                        annotations: Some({
+                            let mut pod_annotations = annotations;
+                            pod_annotations.insert(
+                                "wazuh.adorsys.team/tls-secret-rv".to_string(),
+                                tls_secret_rv.to_string(),
+                            );
+                            pod_annotations
+                        }),
+                        ..Default::default()
+                    }),
+                    spec: Some(PodSpec {
+                        containers,
+                        volumes: Some(vec![
                         Volume {
                             name: "config".to_string(),
                             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
@@ -582,9 +618,14 @@ fn generate_dashboard_deployment(
                             }),
                             ..Default::default()
                         },
-                    ]),
-                    ..Default::default()
-                }),
+                        ]),
+                        ..Default::default()
+                    }),
+                };
+                if let Some(patch) = &dashboard.spec.pod_template {
+                    let _ = apply_pod_template_patch(&mut tpl, patch);
+                }
+                tpl
             },
             ..Default::default()
         }),
@@ -634,6 +675,8 @@ async fn resolve_dashboard_indexer(
 fn generate_dashboard_config_map(
     dashboard: &WazuhDashboard,
     indexer: &WazuhIndexerCluster,
+    opensearch_user: &str,
+    opensearch_password: &str,
 ) -> Result<ConfigMap> {
     let name = dashboard.name_any();
     let indexer_name = indexer.name_any();
@@ -644,11 +687,17 @@ fn generate_dashboard_config_map(
 server.host: "0.0.0.0"
 opensearch.hosts: ["https://{}.{}.svc.cluster.local:9200"]
 opensearch.ssl.verificationMode: none
-opensearch.username: "admin"
-opensearch.password: "admin"
+opensearch.username: "{}"
+opensearch.password: "{}"
 "#,
-        indexer_name, indexer_ns
+        indexer_name, indexer_ns, opensearch_user, opensearch_password
     );
+
+    let custom_nginx = dashboard
+        .spec
+        .nginx
+        .as_ref()
+        .and_then(|n| n.custom_config.clone());
 
     let nginx_conf = r#"
 events {
@@ -684,7 +733,10 @@ http {
 
     let mut data = BTreeMap::new();
     data.insert("opensearch_dashboards.yml".to_string(), config_yml);
-    data.insert("nginx.conf".to_string(), nginx_conf.to_string());
+    data.insert(
+        "nginx.conf".to_string(),
+        custom_nginx.unwrap_or_else(|| nginx_conf.to_string()),
+    );
 
     let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -713,6 +765,64 @@ http {
         data: Some(data),
         ..Default::default()
     })
+}
+
+async fn resolve_opensearch_auth(
+    dashboard: &WazuhDashboard,
+    client: kube::Client,
+    ns: &str,
+) -> Result<(String, String)> {
+    let default_user = "admin".to_string();
+    let default_password = "admin".to_string();
+
+    let auth = match dashboard.spec.auth.as_ref() {
+        Some(auth) => auth,
+        None => return Ok((default_user, default_password)),
+    };
+    if !auth.enabled {
+        return Ok((default_user, default_password));
+    }
+    let secret_name = match auth.auth_secret.as_ref() {
+        Some(name) => name,
+        None => return Ok((default_user, default_password)),
+    };
+
+    let secret_api: Api<Secret> = Api::namespaced(client, ns);
+    let secret = secret_api.get(secret_name).await.map_err(|e| {
+        Error::ValidationError(format!(
+            "Failed to fetch opensearch auth secret {}/{}: {}",
+            ns, secret_name, e
+        ))
+    })?;
+
+    let username = secret_value(&secret, "username").ok_or_else(|| {
+        Error::ValidationError(format!(
+            "Secret {}/{} is missing key username",
+            ns, secret_name
+        ))
+    })?;
+    let password = secret_value(&secret, "password").ok_or_else(|| {
+        Error::ValidationError(format!(
+            "Secret {}/{} is missing key password",
+            ns, secret_name
+        ))
+    })?;
+
+    Ok((username, password))
+}
+
+fn secret_value(secret: &Secret, key: &str) -> Option<String> {
+    if let Some(data) = &secret.data {
+        if let Some(value) = data.get(key) {
+            return String::from_utf8(value.0.clone()).ok();
+        }
+    }
+    if let Some(data) = &secret.string_data {
+        if let Some(value) = data.get(key) {
+            return Some(value.clone());
+        }
+    }
+    None
 }
 
 /// Error policy for WazuhDashboard reconciliation

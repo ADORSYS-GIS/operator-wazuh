@@ -4,6 +4,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::wazuh_ca::WazuhCARef;
+use crate::pod_template::PodTemplateSpecPatch;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -31,12 +32,32 @@ pub struct WazuhDashboardSpec {
     pub tls: Option<TlsConfig>,
     /// Wazuh dashboard version
     pub version: String,
+    /// Pod template overrides
+    #[serde(rename = "podTemplate", default, skip_serializing_if = "Option::is_none")]
+    pub pod_template: Option<PodTemplateSpecPatch>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
 pub struct NginxConfig {
     /// Enable Nginx sidecar
     pub enabled: bool,
+    /// Custom nginx.conf content
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_config: Option<String>,
+    /// Nginx container image config
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImageConfig>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct ImageConfig {
+    /// Image repository (e.g. nginx)
+    pub repository: String,
+    /// Image tag (e.g. stable-alpine)
+    pub tag: String,
+    /// Image pull policy
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_policy: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

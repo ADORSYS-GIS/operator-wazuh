@@ -79,6 +79,9 @@ async fn main() -> Result<()> {
                 WazuhController::<operator_crds::WazuhManagerCluster>::new(context.clone());
             let dashboard_controller =
                 WazuhController::<operator_crds::WazuhDashboard>::new(context.clone());
+            let ca_controller = WazuhController::<operator_crds::WazuhCA>::new(context.clone());
+            let manager_workload_controller =
+                WazuhController::<operator_crds::WazuhManager>::new(context.clone());
             let config_controller =
                 WazuhController::<operator_crds::WazuhConfig>::new(context.clone());
             let rule_controller = WazuhController::<operator_crds::WazuhRule>::new(context.clone());
@@ -105,6 +108,8 @@ async fn main() -> Result<()> {
                 indexer_res,
                 manager_res,
                 dashboard_res,
+                ca_res,
+                manager_workload_res,
                 config_res,
                 rule_res,
                 listener_res,
@@ -116,6 +121,8 @@ async fn main() -> Result<()> {
                 indexer_controller.run(namespace_opt),
                 manager_controller.run(namespace_opt),
                 dashboard_controller.run(namespace_opt),
+                ca_controller.run(namespace_opt),
+                manager_workload_controller.run(namespace_opt),
                 config_controller.run(namespace_opt),
                 rule_controller.run(namespace_opt),
                 listener_controller.run(namespace_opt),
@@ -128,6 +135,8 @@ async fn main() -> Result<()> {
             indexer_res?;
             manager_res?;
             dashboard_res?;
+            ca_res?;
+            manager_workload_res?;
             config_res?;
             rule_res?;
             listener_res?;
@@ -153,6 +162,8 @@ async fn main() -> Result<()> {
             let indexer_crd = operator_crds::WazuhIndexerCluster::crd();
             let manager_crd = operator_crds::WazuhManagerCluster::crd();
             let dashboard_crd = operator_crds::WazuhDashboard::crd();
+            let ca_crd = operator_crds::WazuhCA::crd();
+            let manager_workload_crd = operator_crds::WazuhManager::crd();
             let rule_crd = operator_crds::WazuhRule::crd();
             let decoder_crd = operator_crds::WazuhDecoder::crd();
             let config_crd = operator_crds::WazuhConfig::crd();
@@ -176,6 +187,14 @@ async fn main() -> Result<()> {
             fs::write(
                 output_path.join("wazuhdashboard.yaml"),
                 serde_yaml::to_string(&dashboard_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhca.yaml"),
+                serde_yaml::to_string(&ca_crd)?,
+            )?;
+            fs::write(
+                output_path.join("wazuhmanager.yaml"),
+                serde_yaml::to_string(&manager_workload_crd)?,
             )?;
             fs::write(
                 output_path.join("wazuhrule.yaml"),

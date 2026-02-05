@@ -4,14 +4,33 @@ metadata:
   name: wazuh-indexer-config
   namespace: wazuh-test
 spec:
-  wazuhIndexerClusterRef: wazuh-indexer
+  wazuhIndexerClusterRef:
+    name: wazuh-indexer
   schedule: "*/1 * * * *"
   internal_users:
     kibanaserver:
-      hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
+      hashSecretRef:
+        name: kibanaserver-hash
       reserved: true
       hidden: false
       description: "Demo kibanaserver user"
     newuser:
-      hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
+      hashSecretRef:
+        name: newuser-hash
       description: "A new test user"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kibanaserver-hash
+  namespace: wazuh-test
+stringData:
+  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: newuser-hash
+  namespace: wazuh-test
+stringData:
+  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."

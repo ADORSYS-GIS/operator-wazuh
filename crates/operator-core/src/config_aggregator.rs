@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use kube::api::{Api, ListParams};
-use operator_crds::{WazuhConfig, WazuhDecoder, WazuhManagerCluster, WazuhRule};
+use operator_crds::{WazuhConfig, WazuhDecoder, WazuhRule};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -13,7 +13,7 @@ impl ConfigAggregator {
     pub async fn aggregate_configs(
         client: kube::Client,
         namespace: &str,
-        manager: &WazuhManagerCluster,
+        labels: Option<&BTreeMap<String, String>>,
     ) -> Result<String> {
         let config_api: Api<WazuhConfig> = Api::namespaced(client.clone(), namespace);
         let configs = config_api.list(&ListParams::default()).await?;
@@ -23,7 +23,7 @@ impl ConfigAggregator {
             .filter(|c| {
                 if let Some(selector) = &c.spec.node_selector {
                     for (k, v) in selector {
-                        if manager.metadata.labels.as_ref().and_then(|l| l.get(k)) != Some(v) {
+                        if labels.and_then(|l| l.get(k)) != Some(v) {
                             return false;
                         }
                     }
@@ -67,7 +67,7 @@ impl ConfigAggregator {
     pub async fn aggregate_rules(
         client: kube::Client,
         namespace: &str,
-        manager: &WazuhManagerCluster,
+        labels: Option<&BTreeMap<String, String>>,
     ) -> Result<BTreeMap<String, String>> {
         let api: Api<WazuhRule> = Api::namespaced(client, namespace);
         let rules = api.list(&ListParams::default()).await?;
@@ -80,7 +80,7 @@ impl ConfigAggregator {
             if let Some(selector) = &rule.spec.node_selector {
                 let mut matches = true;
                 for (k, v) in selector {
-                    if manager.metadata.labels.as_ref().and_then(|l| l.get(k)) != Some(v) {
+                    if labels.and_then(|l| l.get(k)) != Some(v) {
                         matches = false;
                         break;
                     }
@@ -112,7 +112,7 @@ impl ConfigAggregator {
     pub async fn aggregate_decoders(
         client: kube::Client,
         namespace: &str,
-        manager: &WazuhManagerCluster,
+        labels: Option<&BTreeMap<String, String>>,
     ) -> Result<BTreeMap<String, String>> {
         let api: Api<WazuhDecoder> = Api::namespaced(client, namespace);
         let decoders = api.list(&ListParams::default()).await?;
@@ -125,7 +125,7 @@ impl ConfigAggregator {
             if let Some(selector) = &decoder.spec.node_selector {
                 let mut matches = true;
                 for (k, v) in selector {
-                    if manager.metadata.labels.as_ref().and_then(|l| l.get(k)) != Some(v) {
+                    if labels.and_then(|l| l.get(k)) != Some(v) {
                         matches = false;
                         break;
                     }

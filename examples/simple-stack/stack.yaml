@@ -9,6 +9,15 @@ spec:
   storage:
     size: "1Gi"
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wazuh-dashboard-opensearch-auth
+  namespace: wazuh-test
+stringData:
+  username: admin
+  password: admin
+---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
 metadata:
@@ -21,6 +30,28 @@ spec:
     name: wazuh-indexer
 ---
 apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManager
+metadata:
+  name: wazuh-manager-master
+  namespace: wazuh-test
+spec:
+  cluster_ref:
+    name: wazuh-manager
+  replicas: 1
+  role: master
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManager
+metadata:
+  name: wazuh-manager-worker
+  namespace: wazuh-test
+spec:
+  cluster_ref:
+    name: wazuh-manager
+  replicas: 1
+  role: worker
+---
+apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhDashboard
 metadata:
   name: wazuh-dashboard
@@ -30,5 +61,10 @@ spec:
   version: "4.14.0"
   indexer_cluster:
     name: wazuh-indexer
+  manager_cluster:
+    name: wazuh-manager
+  auth:
+    enabled: true
+    auth_secret: wazuh-dashboard-opensearch-auth
   service:
     service_type: ClusterIP

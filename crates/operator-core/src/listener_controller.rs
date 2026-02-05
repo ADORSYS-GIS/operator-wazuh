@@ -6,7 +6,7 @@ use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, Service, ServicePort, ServiceSpec};
 use kube::api::{Api, Patch, PatchParams, Resource, ResourceExt};
 use kube::runtime::controller::Action;
-use operator_crds::{WazuhListener, WazuhManagerCluster};
+use operator_crds::{WazuhListener, WazuhManager, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -50,15 +50,135 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
     // 2. Update manager configuration
     // We trigger a full config aggregation and update for all managers in the namespace
     // This is similar to what ConfigController does.
+    let workload_api: Api<WazuhManager> = Api::namespaced(client.clone(), &ns);
+    let workloads = workload_api.list(&kube::api::ListParams::default()).await?;
+
+    if !workloads.items.is_empty() {
+        for manager in workloads {
+            let ossec_conf = ConfigAggregator::aggregate_configs(
+                client.clone(),
+                &ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+            let rules = ConfigAggregator::aggregate_rules(
+                client.clone(),
+                &ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+            let decoders = ConfigAggregator::aggregate_decoders(
+                client.clone(),
+                &ns,
+                manager.metadata.labels.as_ref(),
+            )
+            .await?;
+
+            let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
+            let mut config_data = BTreeMap::new();
+            config_data.insert("ossec.conf".to_string(), ossec_conf.clone());
+
+            let cm = ConfigMap {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(format!("{}-config", manager.name_any())),
+                    owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
+                    ..Default::default()
+                },
+                data: Some(config_data),
+                ..Default::default()
+            };
+
+            cm_api
+                .patch(
+                    &format!("{}-config", manager.name_any()),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&cm),
+                )
+                .await?;
+
+            let rules_cm = ConfigMap {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(format!("{}-rules", manager.name_any())),
+                    owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
+                    ..Default::default()
+                },
+                data: Some(rules.clone()),
+                ..Default::default()
+            };
+
+            cm_api
+                .patch(
+                    &format!("{}-rules", manager.name_any()),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&rules_cm),
+                )
+                .await?;
+
+            let decoders_cm = ConfigMap {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(format!("{}-decoders", manager.name_any())),
+                    owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
+                    ..Default::default()
+                },
+                data: Some(decoders.clone()),
+                ..Default::default()
+            };
+
+            cm_api
+                .patch(
+                    &format!("{}-decoders", manager.name_any()),
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&decoders_cm),
+                )
+                .await?;
+
+            let combined_content = format!("{}{:?}{:?}", ossec_conf, rules, decoders);
+            let hash = ConfigAggregator::calculate_hash(&combined_content);
+            let patch = serde_json::json!({
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "wazuh.adorsys.team/config-hash": hash
+                            }
+                        }
+                    }
+                }
+            });
+
+            let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
+            sts_api
+                .patch(&manager.name_any(), &PatchParams::default(), &Patch::Merge(&patch))
+                .await?;
+        }
+
+        return Ok(Action::requeue(Duration::from_secs(60)));
+    }
+
     let manager_api: Api<WazuhManagerCluster> = Api::namespaced(client.clone(), &ns);
     let managers = manager_api.list(&kube::api::ListParams::default()).await?;
 
     for manager in managers {
         let manager_name = manager.name_any();
 
-        let ossec_conf = ConfigAggregator::aggregate_configs(client.clone(), &ns, &manager).await?;
-        let rules = ConfigAggregator::aggregate_rules(client.clone(), &ns, &manager).await?;
-        let decoders = ConfigAggregator::aggregate_decoders(client.clone(), &ns, &manager).await?;
+        let ossec_conf = ConfigAggregator::aggregate_configs(
+            client.clone(),
+            &ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
+        let rules = ConfigAggregator::aggregate_rules(
+            client.clone(),
+            &ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
+        let decoders = ConfigAggregator::aggregate_decoders(
+            client.clone(),
+            &ns,
+            manager.metadata.labels.as_ref(),
+        )
+        .await?;
         let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
 
         let mut config_data = BTreeMap::new();

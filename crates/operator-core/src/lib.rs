@@ -21,6 +21,9 @@ pub mod manager_controller;
 pub mod rule_controller;
 pub mod security_controller;
 pub mod tls;
+pub mod wazuh_ca_controller;
+pub mod wazuh_manager_controller;
+pub mod pod_template;
 
 pub use client::ClientManager;
 pub use controller::WazuhController;

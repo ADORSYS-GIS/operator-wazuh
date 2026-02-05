@@ -20,42 +20,42 @@ spec:
         properties:
           spec:
             properties:
-              provider:
-                description: CA provider (selfSigned or certManager)
-                type: string
-                enum:
-                - selfSigned
-                - certManager
-              secret_name:
-                description: Name of the secret to store the CA (selfSigned only)
-                nullable: true
-                type: string
               issuer_ref:
                 description: cert-manager issuer reference (certManager only)
                 nullable: true
                 properties:
-                  name:
+                  group:
+                    nullable: true
                     type: string
                   kind:
                     nullable: true
                     type: string
-                  group:
-                    nullable: true
+                  name:
                     type: string
                 required:
                 - name
                 type: object
+              provider:
+                description: CA provider (selfSigned or certManager)
+                enum:
+                - selfSigned
+                - certManager
+                type: string
+              secret_name:
+                description: Name of the secret to store the CA (selfSigned only)
+                nullable: true
+                type: string
             required:
             - provider
             type: object
           status:
             nullable: true
             properties:
-              ready:
-                type: boolean
               message:
                 nullable: true
                 type: string
+              ready:
+                type: boolean
             required:
             - ready
             type: object
