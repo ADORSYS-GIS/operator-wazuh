@@ -14,6 +14,16 @@ impl TlsManager {
         params
             .distinguished_name
             .push(DnType::CommonName, "Wazuh Operator CA");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationalUnitName, "Wazuh");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Wazuh");
+        params
+            .distinguished_name
+            .push(DnType::LocalityName, "California");
+        params.distinguished_name.push(DnType::CountryName, "US");
         params.key_usages = vec![
             rcgen::KeyUsagePurpose::KeyCertSign,
             rcgen::KeyUsagePurpose::DigitalSignature,
@@ -41,6 +51,16 @@ impl TlsManager {
         params
             .distinguished_name
             .push(DnType::CommonName, common_name);
+        params
+            .distinguished_name
+            .push(DnType::OrganizationalUnitName, "Wazuh");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Wazuh");
+        params
+            .distinguished_name
+            .push(DnType::LocalityName, "California");
+        params.distinguished_name.push(DnType::CountryName, "US");
 
         for name in alt_names {
             params

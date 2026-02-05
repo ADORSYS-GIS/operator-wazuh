@@ -266,20 +266,20 @@ fn generate_cronjob(
                         "-c".to_string(),
                         format!(
                             "/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
-                            -cd /etc/wazuh-indexer/security-config \
-                            -p /etc/wazuh-indexer/certs \
+                            -cd /usr/share/wazuh-indexer/config/opensearch-security/ \
+                            -p 9300 \
                             -icl -nhnv \
-                            -cacert /etc/wazuh-indexer/certs/ca.crt \
-                            -cert /etc/wazuh-indexer/certs/admin.crt \
-                            -key /etc/wazuh-indexer/certs/admin.key \
-                            -h {}-headless.{}.svc.cluster.local",
+                            -cacert /usr/share/wazuh-indexer/config/certs/root-ca.pem \
+                            -cert /usr/share/wazuh-indexer/config/certs/admin.pem \
+                            -key /usr/share/wazuh-indexer/config/certs/admin-key.pem \
+                            -h {}.{}.svc.cluster.local",
                             cluster_name, ns
                         ),
                     ]),
                     volume_mounts: Some(vec![
                         VolumeMount {
                             name: "tls".to_string(),
-                            mount_path: "/etc/wazuh-indexer/certs".to_string(),
+                            mount_path: "/usr/share/wazuh-indexer/config/certs".to_string(),
                             ..Default::default()
                         },
                         VolumeMount {

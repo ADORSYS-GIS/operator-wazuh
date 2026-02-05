@@ -3,9 +3,9 @@
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, Service,
-    ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
+    Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
+    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, SecurityContext,
+    Service, ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
@@ -102,15 +102,19 @@ async fn reconcile_indexer(
         alt_names,
     )?;
 
-    let (admin_cert, admin_key) =
-        TlsManager::generate_server_cert(&ca_cert, &ca_key, "admin", vec![])?;
+    let (admin_cert, admin_key) = TlsManager::generate_server_cert(
+        &ca_cert,
+        &ca_key,
+        "admin",
+        vec!["admin".to_string()],
+    )?;
 
     let mut tls_data = BTreeMap::new();
-    tls_data.insert("ca.crt".to_string(), ca_cert);
-    tls_data.insert("tls.crt".to_string(), server_cert);
-    tls_data.insert("tls.key".to_string(), server_key);
-    tls_data.insert("admin.crt".to_string(), admin_cert);
-    tls_data.insert("admin.key".to_string(), admin_key);
+    tls_data.insert("root-ca.pem".to_string(), ca_cert);
+    tls_data.insert("indexer.pem".to_string(), server_cert);
+    tls_data.insert("indexer-key.pem".to_string(), server_key);
+    tls_data.insert("admin.pem".to_string(), admin_cert);
+    tls_data.insert("admin-key.pem".to_string(), admin_key);
 
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
     let tls_secret = k8s_openapi::api::core::v1::Secret {
@@ -272,30 +276,44 @@ fn generate_configmap(indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
     let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
 
     let mut data = BTreeMap::new();
+    let ns = indexer.namespace().unwrap();
     data.insert(
         "opensearch.yml".to_string(),
         format!(
             r#"cluster.name: {}
 network.host: 0.0.0.0
 bootstrap.memory_lock: true
-discovery.seed_hosts: ["{}-headless"]
+bootstrap.system_call_filter: false
+discovery.seed_hosts: ["{}-0.{}-headless.{}.svc.cluster.local"]
 cluster.initial_master_nodes: [{}]
+path.data: /var/lib/wazuh-indexer
+path.logs: /var/log/wazuh-indexer
 plugins.security.disabled: false
-plugins.security.ssl.transport.pemcert_filepath: certs/tls.crt
-plugins.security.ssl.transport.pemkey_filepath: certs/tls.key
-plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ca.crt
+plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
+plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
+plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
 plugins.security.ssl.transport.enforce_hostname_verification: false
 plugins.security.ssl.http.enabled: true
-plugins.security.ssl.http.pemcert_filepath: certs/tls.crt
-plugins.security.ssl.http.pemkey_filepath: certs/tls.key
-plugins.security.ssl.http.pemtrustedcas_filepath: certs/ca.crt
+plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
+plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
+plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
 plugins.security.allow_unsafe_democertificates: true
 plugins.security.allow_default_init_securityindex: true
 plugins.security.authcz.admin_dn:
-  - CN=admin
+  - CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US
+plugins.security.nodes_dn:
+  - "CN=*,OU=Wazuh,O=Wazuh,L=California,C=US"
+plugins.security.restapi.roles_enabled:
+  - "all_access"
+  - "security_rest_api_access"
+plugins.security.allow_default_init_securityindex: true
+cluster.routing.allocation.disk.threshold_enabled: false
+compatibility.override_main_response_version: true
 "#,
             name,
             name,
+            name,
+            ns,
             (0..indexer.spec.replicas)
                 .map(|i| format!("{}-{}", name, i))
                 .collect::<Vec<_>>()
@@ -462,7 +480,28 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                         ]),
                         env: Some(vec![
                             EnvVar {
-                                name: "node.name".to_string(),
+                                name: "OPENSEARCH_JAVA_OPTS".to_string(),
+                                value: Some("-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true".to_string()),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "NETWORK_HOST".to_string(),
+                                value: Some("0.0.0.0".to_string()),
+                                ..Default::default()
+                            },
+                            // EnvVar {
+                            //     name: "node.name".to_string(),
+                            //     value_from: Some(EnvVarSource {
+                            //         field_ref: Some(ObjectFieldSelector {
+                            //             field_path: "metadata.name".to_string(),
+                            //             ..Default::default()
+                            //         }),
+                            //         ..Default::default()
+                            //     }),
+                            //     ..Default::default()
+                            // },
+                            EnvVar {
+                                name: "NODE_NAME".to_string(),
                                 value_from: Some(EnvVarSource {
                                     field_ref: Some(ObjectFieldSelector {
                                         field_path: "metadata.name".to_string(),
@@ -473,27 +512,47 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                                 ..Default::default()
                             },
                             EnvVar {
-                                name: "OPENSEARCH_JAVA_OPTS".to_string(),
-                                value: Some("-Xms512m -Xmx512m".to_string()),
+                                name: "DISCOVERY_SERVICE".to_string(),
+                                value: Some(format!("{}-0.{}-headless.{}.svc.cluster.local", name, name, indexer.namespace().unwrap())),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "KUBERNETES_NAMESPACE".to_string(),
+                                value_from: Some(EnvVarSource {
+                                    field_ref: Some(ObjectFieldSelector {
+                                        field_path: "metadata.namespace".to_string(),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                }),
                                 ..Default::default()
                             },
                         ]),
+                        security_context: Some(SecurityContext {
+                            run_as_user: Some(1000),
+                            run_as_group: Some(1000),
+                            capabilities: Some(Capabilities {
+                                add: Some(vec!["SYS_CHROOT".to_string()]),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
                         volume_mounts: Some(vec![
                             VolumeMount {
                                 name: "indexer-data".to_string(),
-                                mount_path: "/usr/share/opensearch/data".to_string(),
+                                mount_path: "/var/lib/wazuh-indexer".to_string(),
                                 ..Default::default()
                             },
                             VolumeMount {
                                 name: "config".to_string(),
-                                mount_path: "/usr/share/opensearch/config/opensearch.yml"
+                                mount_path: "/usr/share/wazuh-indexer/config/opensearch.yml"
                                     .to_string(),
                                 sub_path: Some("opensearch.yml".to_string()),
                                 ..Default::default()
                             },
                             VolumeMount {
                                 name: "tls".to_string(),
-                                mount_path: "/usr/share/opensearch/config/certs".to_string(),
+                                mount_path: "/usr/share/wazuh-indexer/config/certs".to_string(),
                                 ..Default::default()
                             },
                         ]),
