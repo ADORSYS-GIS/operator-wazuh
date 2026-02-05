@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::wazuh_ca::WazuhCARef;
 use crate::pod_template::PodTemplateSpecPatch;
+use crate::WorkloadConfig;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -35,6 +36,9 @@ pub struct WazuhDashboardSpec {
     /// Pod template overrides
     #[serde(rename = "podTemplate", default, skip_serializing_if = "Option::is_none")]
     pub pod_template: Option<PodTemplateSpecPatch>,
+    /// Workload configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<WorkloadConfig>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

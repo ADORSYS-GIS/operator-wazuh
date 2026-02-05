@@ -4,6 +4,7 @@ use crate::ca::{resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use crate::pod_template::apply_pod_template_patch;
+use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
@@ -70,6 +71,12 @@ async fn reconcile_indexer(
 ) -> Result<Action> {
     let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
+    let workload_name = indexer
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
 
     info!("Reconciling WazuhIndexerCluster: {}/{}", ns, name);
 
@@ -95,12 +102,15 @@ async fn reconcile_indexer(
         format!("{}-headless.{}.svc.cluster.local", name, ns),
     ];
     for i in 0..indexer.spec.replicas {
-        alt_names.push(format!("{}-{}", name, i));
-        alt_names.push(format!("{}-{}.{}-headless", name, i, name));
-        alt_names.push(format!("{}-{}.{}-headless.{}", name, i, name, ns));
+        alt_names.push(format!("{}-{}", workload_name, i));
+        alt_names.push(format!("{}-{}.{}-headless", workload_name, i, name));
+        alt_names.push(format!(
+            "{}-{}.{}-headless.{}",
+            workload_name, i, name, ns
+        ));
         alt_names.push(format!(
             "{}-{}.{}-headless.{}.svc.cluster.local",
-            name, i, name, ns
+            workload_name, i, name, ns
         ));
     }
 
@@ -312,7 +322,7 @@ async fn reconcile_indexer(
         .unwrap_or_else(|| "missing".to_string());
 
     // 1. Generate and Apply ConfigMap
-    let cm = generate_configmap(&indexer)?;
+    let cm = generate_configmap(&indexer, &workload_name)?;
     cm_api
         .patch(
             &format!("{}-config", name),
@@ -342,10 +352,10 @@ async fn reconcile_indexer(
         .await?;
 
     // 4. Generate and Apply StatefulSet
-    let sts = generate_statefulset(&indexer, &tls_secret_rv)?;
+    let sts = generate_statefulset(&indexer, &workload_name, &tls_secret_rv)?;
     sts_api
         .patch(
-            &name,
+            &workload_name,
             &PatchParams::apply("wazuh-operator"),
             &Patch::Apply(&sts),
         )
@@ -379,9 +389,15 @@ async fn cleanup_indexer(
 async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<bool> {
     let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
+    let workload_name = indexer
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
     let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
 
-    let sts = sts_api.get(&name).await?;
+    let sts = sts_api.get(&workload_name).await?;
     let ready_replicas = sts
         .status
         .as_ref()
@@ -396,10 +412,16 @@ async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Re
 async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<()> {
     let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
+    let workload_name = indexer
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
     let indexer_api: Api<WazuhIndexerCluster> = Api::namespaced(client.clone(), &ns);
     let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
 
-    let sts = sts_api.get(&name).await?;
+    let sts = sts_api.get(&workload_name).await?;
     let ready_replicas = sts
         .status
         .as_ref()
@@ -433,7 +455,7 @@ async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> R
     Ok(())
 }
 
-fn generate_configmap(indexer: &WazuhIndexerCluster) -> Result<ConfigMap> {
+fn generate_configmap(indexer: &WazuhIndexerCluster, workload_name: &str) -> Result<ConfigMap> {
     let name = indexer.name_any();
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
@@ -486,11 +508,11 @@ cluster.routing.allocation.disk.threshold_enabled: false
 compatibility.override_main_response_version: true
 "#,
             name,
-            name,
+            workload_name,
             name,
             ns,
             (0..indexer.spec.replicas)
-                .map(|i| format!("{}-{}", name, i))
+                .map(|i| format!("{}-{}", workload_name, i))
                 .collect::<Vec<_>>()
                 .join(",")
         ),
@@ -600,6 +622,7 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
 
 fn generate_statefulset(
     indexer: &WazuhIndexerCluster,
+    workload_name: &str,
     tls_secret_rv: &str,
 ) -> Result<StatefulSet> {
     let name = indexer.name_any();
@@ -627,7 +650,7 @@ fn generate_statefulset(
 
     let sts = StatefulSet {
         metadata: kube::api::ObjectMeta {
-            name: Some(name.clone()),
+            name: Some(workload_name.to_string()),
             labels: Some(labels.clone()),
             annotations: Some(annotations.clone()),
             owner_references: owner_ref,
@@ -780,29 +803,42 @@ fn generate_statefulset(
                 }
                 tpl
             },
-            volume_claim_templates: Some(vec![PersistentVolumeClaim {
-                metadata: kube::api::ObjectMeta {
-                    name: Some("indexer-data".to_string()),
-                    ..Default::default()
-                },
-                spec: Some(PersistentVolumeClaimSpec {
-                    access_modes: Some(vec!["ReadWriteOnce".to_string()]),
-                    storage_class_name: indexer.spec.storage.storage_class.clone(),
-                    resources: Some(VolumeResourceRequirements {
-                        requests: Some({
-                            let mut requests = BTreeMap::new();
-                            requests.insert(
-                                "storage".to_string(),
-                                Quantity(indexer.spec.storage.size.clone()),
-                            );
-                            requests
+            volume_claim_templates: {
+                let mut defaults = Vec::new();
+                if !indexer.spec.disable_default_pvc.unwrap_or(false) {
+                    defaults.push(PersistentVolumeClaim {
+                        metadata: kube::api::ObjectMeta {
+                            name: Some("indexer-data".to_string()),
+                            ..Default::default()
+                        },
+                        spec: Some(PersistentVolumeClaimSpec {
+                            access_modes: Some(vec!["ReadWriteOnce".to_string()]),
+                            storage_class_name: indexer.spec.storage.storage_class.clone(),
+                            resources: Some(VolumeResourceRequirements {
+                                requests: Some({
+                                    let mut requests = BTreeMap::new();
+                                    requests.insert(
+                                        "storage".to_string(),
+                                        Quantity(indexer.spec.storage.size.clone()),
+                                    );
+                                    requests
+                                }),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
                         }),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }),
-                status: None,
-            }]),
+                        status: None,
+                    });
+                }
+                let mut overrides = Vec::new();
+                if let Some(templates) = indexer.spec.volume_claim_templates.as_ref() {
+                    for tmpl in templates {
+                        overrides.push(pvc_from_template(tmpl)?);
+                    }
+                }
+                let merged = merge_volume_claims(defaults, overrides);
+                if merged.is_empty() { None } else { Some(merged) }
+            },
             update_strategy: Some(StatefulSetUpdateStrategy {
                 type_: Some("RollingUpdate".to_string()),
                 ..Default::default()

@@ -20,6 +20,10 @@ spec:
         properties:
           spec:
             properties:
+              disableDefaultPvc:
+                description: Disable default PVC templates
+                nullable: true
+                type: boolean
               podTemplate:
                 description: Pod template overrides
                 nullable: true
@@ -112,6 +116,44 @@ spec:
               version:
                 description: Wazuh indexer version
                 type: string
+              volumeClaimTemplates:
+                description: Additional volume claim templates
+                items:
+                  properties:
+                    metadata:
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        labels:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    spec:
+                      description: PVC spec (PersistentVolumeClaimSpec)
+                  required:
+                  - metadata
+                  - spec
+                  type: object
+                nullable: true
+                type: array
+              workload:
+                description: Workload configuration
+                nullable: true
+                properties:
+                  name:
+                    description: Override workload name (used for StatefulSet/Deployment name and pod name prefix)
+                    nullable: true
+                    type: string
+                type: object
             required:
             - replicas
             - storage

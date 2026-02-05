@@ -21,6 +21,8 @@ pub mod wazuh_manager_backup;
 pub mod wazuh_manager;
 pub mod wazuh_manager_cluster;
 pub mod pod_template;
+pub mod workload;
+pub mod volume_claim;
 pub mod wazuh_rule;
 
 pub use wazuh_agent_group::WazuhAgentGroup;
@@ -43,4 +45,6 @@ pub use wazuh_manager::{
 };
 pub use wazuh_manager_cluster::WazuhManagerCluster;
 pub use pod_template::{PodMetadataPatch, PodSpecPatch, PodTemplateSpecPatch};
+pub use workload::WorkloadConfig;
+pub use volume_claim::{VolumeClaimMetadata, VolumeClaimTemplate};
 pub use wazuh_rule::WazuhRule;

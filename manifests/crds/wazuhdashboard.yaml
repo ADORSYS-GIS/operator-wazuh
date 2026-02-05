@@ -191,6 +191,15 @@ spec:
               version:
                 description: Wazuh dashboard version
                 type: string
+              workload:
+                description: Workload configuration
+                nullable: true
+                properties:
+                  name:
+                    description: Override workload name (used for StatefulSet/Deployment name and pod name prefix)
+                    nullable: true
+                    type: string
+                type: object
             required:
             - indexer_cluster
             - replicas

@@ -24,6 +24,7 @@ pub mod tls;
 pub mod wazuh_ca_controller;
 pub mod wazuh_manager_controller;
 pub mod pod_template;
+pub mod volume_claim;
 
 pub use client::ClientManager;
 pub use controller::WazuhController;

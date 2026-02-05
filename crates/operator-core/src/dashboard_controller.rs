@@ -65,6 +65,12 @@ async fn reconcile_dashboard(
 ) -> Result<Action> {
     let ns = dashboard.namespace().unwrap();
     let name = dashboard.name_any();
+    let workload_name = dashboard
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
 
     info!("Reconciling WazuhDashboard: {}/{}", ns, name);
 
@@ -289,11 +295,16 @@ async fn reconcile_dashboard(
 
     // 6. Create Deployment
     let deploy_api: Api<Deployment> = Api::namespaced(client.clone(), &ns);
-    let deploy = generate_dashboard_deployment(&dashboard, &indexer, &tls_secret_rv)?;
+    let deploy = generate_dashboard_deployment(
+        &dashboard,
+        &indexer,
+        &tls_secret_rv,
+        &workload_name,
+    )?;
 
     deploy_api
         .patch(
-            &name,
+            &workload_name,
             &PatchParams::apply("wazuh-operator"),
             &Patch::Apply(&deploy),
         )
@@ -342,10 +353,16 @@ async fn cleanup_dashboard(
 async fn update_dashboard_status(dashboard: &WazuhDashboard, client: kube::Client) -> Result<()> {
     let ns = dashboard.namespace().unwrap();
     let name = dashboard.name_any();
+    let workload_name = dashboard
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
     let dashboard_api: Api<WazuhDashboard> = Api::namespaced(client.clone(), &ns);
     let deploy_api: Api<Deployment> = Api::namespaced(client, &ns);
 
-    let deploy = deploy_api.get(&name).await?;
+    let deploy = deploy_api.get(&workload_name).await?;
     let ready_replicas = deploy
         .status
         .as_ref()
@@ -442,6 +459,7 @@ fn generate_dashboard_deployment(
     dashboard: &WazuhDashboard,
     indexer: &WazuhIndexerCluster,
     tls_secret_rv: &str,
+    workload_name: &str,
 ) -> Result<Deployment> {
     let name = dashboard.name_any();
     let mut labels = BTreeMap::new();
@@ -573,7 +591,7 @@ fn generate_dashboard_deployment(
 
     Ok(Deployment {
         metadata: kube::api::ObjectMeta {
-            name: Some(name.clone()),
+            name: Some(workload_name.to_string()),
             labels: Some(labels.clone()),
             annotations: Some(annotations.clone()),
             owner_references: owner_ref,

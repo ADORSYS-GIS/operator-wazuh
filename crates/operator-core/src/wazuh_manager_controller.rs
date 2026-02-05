@@ -12,6 +12,7 @@ use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
 use kube::{ResourceExt};
 use crate::pod_template::apply_pod_template_patch;
+use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use operator_crds::{
     WazuhIndexerCluster, WazuhManager, WazuhManagerCluster, WazuhManagerRole,
 };
@@ -61,6 +62,12 @@ async fn reconcile_manager(
 ) -> Result<Action> {
     let ns = manager.namespace().unwrap();
     let name = manager.name_any();
+    let workload_name = manager
+        .spec
+        .workload
+        .as_ref()
+        .and_then(|w| w.name.clone())
+        .unwrap_or_else(|| name.clone());
 
     info!("Reconciling WazuhManager: {}/{}", ns, name);
 
@@ -135,10 +142,10 @@ async fn reconcile_manager(
         .unwrap_or_else(|| "missing".to_string());
 
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
-    let sts = generate_statefulset(&manager, &cluster, &indexer, &tls_secret_rv)?;
+    let sts = generate_statefulset(&manager, &workload_name, &cluster, &indexer, &tls_secret_rv)?;
     sts_api
         .patch(
-            &name,
+            &workload_name,
             &PatchParams::apply("wazuh-operator"),
             &Patch::Apply(&sts),
         )
@@ -218,10 +225,16 @@ async fn collect_master_nodes(
         if !matches!(manager.spec.role, WazuhManagerRole::Master) {
             continue;
         }
+        let workload_name = manager
+            .spec
+            .workload
+            .as_ref()
+            .and_then(|w| w.name.clone())
+            .unwrap_or_else(|| manager.name_any());
         for i in 0..manager.spec.replicas {
             nodes.push(format!(
                 "{}-{}.{}-headless.{}.svc.cluster.local",
-                manager.name_any(),
+                workload_name,
                 i,
                 cluster_name,
                 cluster_ns
@@ -431,6 +444,7 @@ http {
 
 fn generate_statefulset(
     manager: &WazuhManager,
+    workload_name: &str,
     cluster: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
     tls_secret_rv: &str,
@@ -654,7 +668,7 @@ fn generate_statefulset(
 
     Ok(StatefulSet {
         metadata: kube::api::ObjectMeta {
-            name: Some(name.clone()),
+            name: Some(workload_name.to_string()),
             labels: Some(labels.clone()),
             annotations: Some(annotations.clone()),
             owner_references: owner_ref,
@@ -721,6 +735,17 @@ fn generate_statefulset(
                     let _ = apply_pod_template_patch(&mut tpl, patch);
                 }
                 tpl
+            },
+            volume_claim_templates: {
+                let defaults = Vec::new();
+                let mut overrides = Vec::new();
+                if let Some(templates) = manager.spec.volume_claim_templates.as_ref() {
+                    for tmpl in templates {
+                        overrides.push(pvc_from_template(tmpl)?);
+                    }
+                }
+                let merged = merge_volume_claims(defaults, overrides);
+                if merged.is_empty() { None } else { Some(merged) }
             },
             update_strategy: Some(StatefulSetUpdateStrategy {
                 type_: Some("RollingUpdate".to_string()),
