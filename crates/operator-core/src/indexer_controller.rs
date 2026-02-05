@@ -298,7 +298,6 @@ plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/config/cert
 plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
 plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
 plugins.security.allow_unsafe_democertificates: true
-plugins.security.allow_default_init_securityindex: true
 plugins.security.authcz.admin_dn:
   - CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US
 plugins.security.nodes_dn:
@@ -455,7 +454,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                 match_labels: Some(labels.clone()),
                 ..Default::default()
             },
-            service_name: Some(name.clone()),
+            service_name: Some(format!("{}-headless", name.clone())),
             template: PodTemplateSpec {
                 metadata: Some(kube::api::ObjectMeta {
                     labels: Some(labels),

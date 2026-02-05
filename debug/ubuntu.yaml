@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ubuntu-debug
+  namespace: wazuh-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ubuntu-debug
+  template:
+    metadata:
+      labels:
+        app: ubuntu-debug
+    spec:
+      containers:
+        - name: ubuntu
+          image: ubuntu:24.04
+          command: ["/bin/bash", "-lc", "tail -f /dev/null"]
+          tty: true
+          stdin: true
