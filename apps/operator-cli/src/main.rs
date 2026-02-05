@@ -11,6 +11,8 @@ use clap::Parser;
 use futures::join;
 use operator_core::WazuhController;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
+use std::env;
 
 #[derive(Parser)]
 #[command(name = "wazuh-operator")]
@@ -54,7 +56,18 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { namespace } => {
-            tracing_subscriber::fmt::init();
+            let log_format = env::var("LOG_FORMAT").unwrap_or_else(|_| "plain".to_string());
+            let env_filter =
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+            match log_format.as_str() {
+                "json" => tracing_subscriber::fmt()
+                    .with_env_filter(env_filter)
+                    .json()
+                    .init(),
+                _ => tracing_subscriber::fmt()
+                    .with_env_filter(env_filter)
+                    .init(),
+            }
             info!("Starting Wazuh operator in namespace: {}", namespace);
 
             let client = kube::Client::try_default().await?;

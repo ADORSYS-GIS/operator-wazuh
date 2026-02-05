@@ -1,5 +1,7 @@
 //! WazuhDashboard controller implementation
 
+use crate::ca::{resolve_wazuh_ca, ResolvedCa};
+use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::Deployment;
@@ -120,58 +122,158 @@ async fn reconcile_dashboard(
         );
     }
 
-    // 4. Implement TLS and Secret Mounting
+    // 4. Ensure TLS (shared WazuhCA if configured)
     let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns);
-    let (ca_cert, ca_key) = TlsManager::generate_ca()?;
-    let (server_cert, server_key) = TlsManager::generate_server_cert(
-        &ca_cert,
-        &ca_key,
-        &format!("{}.{}.svc.cluster.local", name, ns),
-        vec![name.clone(), format!("{}.{}", name, ns)],
-    )?;
+    let tls_secret_name = format!("{}-tls", name);
+    let alt_names = vec![
+        name.clone(),
+        format!("{}.{}", name, ns),
+        format!("{}.{}.svc.cluster.local", name, ns),
+    ];
+    let server_keys = ["ca.crt", "tls.crt", "tls.key"];
+    let ca_ref = dashboard.spec.tls.as_ref().and_then(|t| t.ca_ref.as_ref());
 
-    let mut tls_data = BTreeMap::new();
-    tls_data.insert("ca.crt".to_string(), ca_cert);
-    tls_data.insert("tls.crt".to_string(), server_cert);
-    tls_data.insert("tls.key".to_string(), server_key);
+    if let Some(ca_ref) = ca_ref {
+        match resolve_wazuh_ca(client.clone(), &ns, ca_ref).await? {
+            ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
+                let server_ready = secret_api
+                    .get(&tls_secret_name)
+                    .await
+                    .ok()
+                    .map_or(false, |s| secret_has_keys(&s, &server_keys));
+                if !server_ready {
+                    let (server_cert, server_key) = TlsManager::generate_server_cert(
+                        &ca_cert,
+                        &ca_key,
+                        &format!("{}.{}.svc.cluster.local", name, ns),
+                        alt_names.clone(),
+                    )?;
 
-    let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
+                    let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
+                    let mut tls_data = BTreeMap::new();
+                    tls_data.insert("ca.crt".to_string(), ca_cert);
+                    tls_data.insert("tls.crt".to_string(), server_cert);
+                    tls_data.insert("tls.key".to_string(), server_key);
 
-    let mut labels = BTreeMap::new();
-    labels.insert("app".to_string(), "wazuh-dashboard".to_string());
-    labels.insert("cluster".to_string(), name.clone());
-    labels.insert(
-        "app.kubernetes.io/managed-by".to_string(),
-        "wazuh-operator".to_string(),
-    );
+                    let mut labels = BTreeMap::new();
+                    labels.insert("app".to_string(), "wazuh-dashboard".to_string());
+                    labels.insert("cluster".to_string(), name.clone());
+                    labels.insert(
+                        "app.kubernetes.io/managed-by".to_string(),
+                        "wazuh-operator".to_string(),
+                    );
 
-    let mut annotations = BTreeMap::new();
-    annotations.insert(
-        "app.kubernetes.io/created-by".to_string(),
-        "wazuh-operator".to_string(),
-    );
+                    let mut annotations = BTreeMap::new();
+                    annotations.insert(
+                        "app.kubernetes.io/created-by".to_string(),
+                        "wazuh-operator".to_string(),
+                    );
 
-    let tls_secret = Secret {
-        metadata: kube::api::ObjectMeta {
-            name: Some(format!("{}-tls", name)),
-            labels: Some(labels),
-            annotations: Some(annotations),
-            owner_references: owner_ref,
-            ..Default::default()
-        },
-        string_data: Some(tls_data),
-        ..Default::default()
-    };
+                    let tls_secret = Secret {
+                        metadata: kube::api::ObjectMeta {
+                            name: Some(tls_secret_name.clone()),
+                            labels: Some(labels),
+                            annotations: Some(annotations),
+                            owner_references: owner_ref,
+                            ..Default::default()
+                        },
+                        string_data: Some(tls_data),
+                        ..Default::default()
+                    };
 
-    secret_api
-        .patch(
-            &format!("{}-tls", name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&tls_secret),
-        )
-        .await?;
+                    secret_api
+                        .patch(
+                            &tls_secret_name,
+                            &PatchParams::apply("wazuh-operator"),
+                            &Patch::Apply(&tls_secret),
+                        )
+                        .await?;
+                }
+            }
+            ResolvedCa::CertManager { issuer_ref } => {
+                let cert_api: Api<Certificate> = Api::namespaced(client.clone(), &ns);
+                let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
 
-    info!("Successfully reconciled TLS Secret for dashboard {}", name);
+                let server_cert = Certificate {
+                    metadata: kube::api::ObjectMeta {
+                        name: Some(tls_secret_name.clone()),
+                        owner_references: owner_ref,
+                        ..Default::default()
+                    },
+                    spec: crate::cert_manager::CertificateSpec {
+                        secret_name: tls_secret_name.clone(),
+                        issuer_ref,
+                        common_name: Some(format!("{}.{}.svc.cluster.local", name, ns)),
+                        dns_names: alt_names.clone(),
+                        usages: vec!["server auth".to_string()],
+                    },
+                };
+
+                cert_api
+                    .patch(
+                        &tls_secret_name,
+                        &PatchParams::apply("wazuh-operator"),
+                        &Patch::Apply(&server_cert),
+                    )
+                    .await?;
+            }
+        }
+    } else {
+        let server_ready = secret_api
+            .get(&tls_secret_name)
+            .await
+            .ok()
+            .map_or(false, |s| secret_has_keys(&s, &server_keys));
+        if !server_ready {
+            let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+            let (server_cert, server_key) = TlsManager::generate_server_cert(
+                &ca_cert,
+                &ca_key,
+                &format!("{}.{}.svc.cluster.local", name, ns),
+                alt_names.clone(),
+            )?;
+
+            let owner_ref = dashboard.controller_owner_ref(&()).map(|o| vec![o]);
+            let mut tls_data = BTreeMap::new();
+            tls_data.insert("ca.crt".to_string(), ca_cert);
+            tls_data.insert("tls.crt".to_string(), server_cert);
+            tls_data.insert("tls.key".to_string(), server_key);
+
+            let mut labels = BTreeMap::new();
+            labels.insert("app".to_string(), "wazuh-dashboard".to_string());
+            labels.insert("cluster".to_string(), name.clone());
+            labels.insert(
+                "app.kubernetes.io/managed-by".to_string(),
+                "wazuh-operator".to_string(),
+            );
+
+            let mut annotations = BTreeMap::new();
+            annotations.insert(
+                "app.kubernetes.io/created-by".to_string(),
+                "wazuh-operator".to_string(),
+            );
+
+            let tls_secret = Secret {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(tls_secret_name.clone()),
+                    labels: Some(labels),
+                    annotations: Some(annotations),
+                    owner_references: owner_ref,
+                    ..Default::default()
+                },
+                string_data: Some(tls_data),
+                ..Default::default()
+            };
+
+            secret_api
+                .patch(
+                    &tls_secret_name,
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&tls_secret),
+                )
+                .await?;
+        }
+    }
 
     // 5. Create Deployment
     let deploy_api: Api<Deployment> = Api::namespaced(client.clone(), &ns);
@@ -211,7 +313,7 @@ async fn reconcile_dashboard(
     // 8. Update status
     update_dashboard_status(&dashboard, client).await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 async fn cleanup_dashboard(
@@ -621,4 +723,17 @@ pub fn error_policy(
 ) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
+}
+
+fn secret_has_keys(secret: &Secret, keys: &[&str]) -> bool {
+    keys.iter().all(|key| {
+        secret
+            .data
+            .as_ref()
+            .map_or(false, |data| data.contains_key(*key))
+            || secret
+                .string_data
+                .as_ref()
+                .map_or(false, |data| data.contains_key(*key))
+    })
 }

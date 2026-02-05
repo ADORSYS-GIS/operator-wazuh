@@ -20,6 +20,7 @@ rules:
   - wazuhindexerclusters
   - wazuhmanagerclusters
   - wazuhdashboards
+  - wazuhcas
   - wazuhindexerconfigs
   - wazuhindexerbackups
   - wazuhmanagerbackups
@@ -37,6 +38,7 @@ rules:
   - wazuhindexerclusters/status
   - wazuhmanagerclusters/status
   - wazuhdashboards/status
+  - wazuhcas/status
   - wazuhindexerconfigs/status
   - wazuhindexerbackups/status
   - wazuhmanagerbackups/status
@@ -87,6 +89,19 @@ rules:
   resources:
   - cronjobs
   - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificates/status
   verbs:
   - get
   - list
@@ -238,6 +253,8 @@ spec:
         env:
         - name: RUST_LOG
           value: info
+        - name: LOG_FORMAT
+          value: json
         image: wazuh-operator:latest
         imagePullPolicy: IfNotPresent
         name: operator

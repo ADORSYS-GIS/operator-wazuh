@@ -48,7 +48,7 @@ pub async fn reconcile_rule(rule: Arc<WazuhRule>, ctx: Arc<RuleContext>) -> Resu
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 /// Error policy for WazuhRule reconciliation
@@ -115,7 +115,7 @@ pub async fn reconcile_decoder(
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 /// Error policy for WazuhDecoder reconciliation

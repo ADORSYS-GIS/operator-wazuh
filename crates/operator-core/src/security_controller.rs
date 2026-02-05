@@ -88,7 +88,7 @@ pub async fn reconcile_security(
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&status))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 /// Reconcile function for WazuhIndexerUser
@@ -135,7 +135,7 @@ pub async fn reconcile_user(
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&status))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 /// Reconcile function for WazuhIndexerIndexTemplate
@@ -175,5 +175,5 @@ pub async fn reconcile_template(
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&status))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }

@@ -111,7 +111,7 @@ async fn reconcile_config(
         ns, name
     );
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 async fn cleanup_config(
@@ -243,6 +243,12 @@ fn generate_cronjob(
 ) -> Result<CronJob> {
     let cluster_name = cluster.name_any();
     let ns = cluster.namespace().unwrap();
+    let tls_secret_name = cluster
+        .spec
+        .tls
+        .as_ref()
+        .and_then(|t| t.cert_secret.clone())
+        .unwrap_or_else(|| format!("{}-tls", cluster_name));
     
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer-config-job".to_string());
@@ -266,12 +272,12 @@ fn generate_cronjob(
                         "-c".to_string(),
                         format!(
                             "/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
-                            -cd /usr/share/wazuh-indexer/config/opensearch-security/ \
+                            -cd /etc/wazuh-indexer/security-config/ \
                             -p 9200 \
                             -icl -nhnv \
-                            -cacert /usr/share/wazuh-indexer/config/certs/root-ca.pem \
-                            -cert /usr/share/wazuh-indexer/config/certs/admin.pem \
-                            -key /usr/share/wazuh-indexer/config/certs/admin-key.pem \
+                            -cacert /usr/share/wazuh-indexer/config/certs/ca.crt \
+                            -cert /usr/share/wazuh-indexer/config/admin-certs/tls.crt \
+                            -key /usr/share/wazuh-indexer/config/admin-certs/tls.key \
                             -h {}.{}.svc.cluster.local",
                             cluster_name, ns
                         ),
@@ -280,6 +286,11 @@ fn generate_cronjob(
                         VolumeMount {
                             name: "tls".to_string(),
                             mount_path: "/usr/share/wazuh-indexer/config/certs".to_string(),
+                            ..Default::default()
+                        },
+                        VolumeMount {
+                            name: "admin-tls".to_string(),
+                            mount_path: "/usr/share/wazuh-indexer/config/admin-certs".to_string(),
                             ..Default::default()
                         },
                         VolumeMount {
@@ -306,7 +317,15 @@ fn generate_cronjob(
                     Volume {
                         name: "tls".to_string(),
                         secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
-                            secret_name: Some(format!("{}-tls", cluster_name)),
+                            secret_name: Some(tls_secret_name),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    Volume {
+                        name: "admin-tls".to_string(),
+                        secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
+                            secret_name: Some(format!("{}-admin-tls", cluster_name)),
                             ..Default::default()
                         }),
                         ..Default::default()

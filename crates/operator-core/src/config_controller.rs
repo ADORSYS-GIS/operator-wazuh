@@ -162,7 +162,7 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 /// Error policy for WazuhConfig reconciliation

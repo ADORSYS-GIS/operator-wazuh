@@ -2,6 +2,9 @@
 
 use crate::error::Result;
 use futures::StreamExt;
+use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
+use k8s_openapi::api::batch::v1::CronJob;
+use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
 use kube::api::{Api, Resource};
 use kube::runtime::controller::Controller;
 use kube::runtime::watcher::Config;
@@ -66,12 +69,36 @@ impl WazuhController<operator_crds::WazuhIndexerCluster> {
         } else {
             Api::all(client.clone())
         };
+        let sts_api: Api<StatefulSet> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let svc_api: Api<Service> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let cm_api: Api<ConfigMap> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let secret_api: Api<Secret> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::indexer_controller::IndexerContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(sts_api, Config::default())
+            .owns(svc_api, Config::default())
+            .owns(cm_api, Config::default())
+            .owns(secret_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::indexer_controller::reconcile,
@@ -100,12 +127,36 @@ impl WazuhController<operator_crds::WazuhManagerCluster> {
         } else {
             Api::all(client.clone())
         };
+        let sts_api: Api<StatefulSet> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let svc_api: Api<Service> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let cm_api: Api<ConfigMap> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let secret_api: Api<Secret> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::manager_controller::ManagerContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(sts_api, Config::default())
+            .owns(svc_api, Config::default())
+            .owns(cm_api, Config::default())
+            .owns(secret_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::manager_controller::reconcile,
@@ -134,12 +185,36 @@ impl WazuhController<operator_crds::WazuhDashboard> {
         } else {
             Api::all(client.clone())
         };
+        let deploy_api: Api<Deployment> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let svc_api: Api<Service> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let cm_api: Api<ConfigMap> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let secret_api: Api<Secret> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::dashboard_controller::DashboardContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(deploy_api, Config::default())
+            .owns(svc_api, Config::default())
+            .owns(cm_api, Config::default())
+            .owns(secret_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::dashboard_controller::reconcile,
@@ -196,12 +271,24 @@ impl WazuhController<operator_crds::WazuhIndexerConfig> {
         } else {
             Api::all(client.clone())
         };
+        let cronjob_api: Api<CronJob> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
+        let cm_api: Api<ConfigMap> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::indexer_config_controller::IndexerConfigContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(cronjob_api, Config::default())
+            .owns(cm_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::indexer_config_controller::reconcile,
@@ -230,12 +317,18 @@ impl WazuhController<operator_crds::WazuhIndexerBackup> {
         } else {
             Api::all(client.clone())
         };
+        let cronjob_api: Api<CronJob> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::indexer_backup_controller::IndexerBackupContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(cronjob_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::indexer_backup_controller::reconcile,
@@ -264,12 +357,18 @@ impl WazuhController<operator_crds::WazuhManagerBackup> {
         } else {
             Api::all(client.clone())
         };
+        let cronjob_api: Api<CronJob> = if let Some(ns) = namespace {
+            Api::namespaced(client.clone(), ns)
+        } else {
+            Api::all(client.clone())
+        };
 
         let ctx = Arc::new(crate::manager_backup_controller::ManagerBackupContext::new(
             client.clone(),
         ));
 
         Controller::new(api, Config::default())
+            .owns(cronjob_api, Config::default())
             .shutdown_on_signal()
             .run(
                 crate::manager_backup_controller::reconcile,

@@ -3,6 +3,7 @@
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::wazuh_ca::WazuhCARef;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -26,6 +27,8 @@ pub struct WazuhDashboardSpec {
     pub auth: Option<AuthConfig>,
     /// Nginx configuration
     pub nginx: Option<NginxConfig>,
+    /// TLS configuration
+    pub tls: Option<TlsConfig>,
     /// Wazuh dashboard version
     pub version: String,
 }
@@ -34,6 +37,14 @@ pub struct WazuhDashboardSpec {
 pub struct NginxConfig {
     /// Enable Nginx sidecar
     pub enabled: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct TlsConfig {
+    /// Enable TLS
+    pub enabled: bool,
+    /// Reference to shared WazuhCA
+    pub ca_ref: Option<WazuhCARef>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

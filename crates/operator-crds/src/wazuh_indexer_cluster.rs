@@ -3,6 +3,7 @@
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::wazuh_ca::WazuhCARef;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -36,6 +37,8 @@ pub struct StorageConfig {
 pub struct TlsConfig {
     /// Enable TLS
     pub enabled: bool,
+    /// Reference to shared WazuhCA
+    pub ca_ref: Option<WazuhCARef>,
     /// TLS certificate secret
     pub cert_secret: Option<String>,
 }

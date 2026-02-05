@@ -6,6 +6,7 @@
 //! - WazuhDashboard
 
 pub mod wazuh_agent_group;
+pub mod wazuh_ca;
 pub mod wazuh_config;
 pub mod wazuh_dashboard;
 pub mod wazuh_decoder;
@@ -21,6 +22,7 @@ pub mod wazuh_manager_cluster;
 pub mod wazuh_rule;
 
 pub use wazuh_agent_group::WazuhAgentGroup;
+pub use wazuh_ca::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef, WazuhCAStatus};
 pub use wazuh_config::WazuhConfig;
 pub use wazuh_dashboard::WazuhDashboard;
 pub use wazuh_decoder::WazuhDecoder;

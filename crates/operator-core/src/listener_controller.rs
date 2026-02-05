@@ -126,7 +126,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
         .patch_status(&name, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 fn generate_listener_service(listener: &WazuhListener) -> Result<Service> {

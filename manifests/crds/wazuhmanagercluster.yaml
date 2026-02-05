@@ -91,6 +91,30 @@ spec:
                 description: Number of manager nodes
                 format: int32
                 type: integer
+              tls:
+                description: TLS configuration
+                nullable: true
+                properties:
+                  ca_ref:
+                    description: Reference to shared WazuhCA
+                    nullable: true
+                    properties:
+                      name:
+                        description: Name of the WazuhCA resource
+                        type: string
+                      namespace:
+                        description: Namespace of the WazuhCA resource (defaults to the cluster namespace)
+                        nullable: true
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  enabled:
+                    description: Enable TLS
+                    type: boolean
+                required:
+                - enabled
+                type: object
               version:
                 description: Wazuh manager version
                 type: string

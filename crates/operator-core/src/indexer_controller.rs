@@ -1,5 +1,7 @@
 //! WazuhIndexerCluster controller implementation
 
+use crate::ca::{resolve_wazuh_ca, ResolvedCa};
+use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
@@ -75,8 +77,13 @@ async fn reconcile_indexer(
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     let secret_api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), &ns);
 
-    // 0. Generate TLS
-    let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+    // 0. Ensure TLS (shared WazuhCA if configured)
+    let tls_config = indexer.spec.tls.as_ref();
+    let tls_secret_name = tls_config
+        .and_then(|t| t.cert_secret.clone())
+        .unwrap_or_else(|| format!("{}-tls", name));
+    let admin_tls_secret_name = format!("{}-admin-tls", name);
+
     let mut alt_names = vec![
         name.clone(),
         format!("{}.{}", name, ns),
@@ -95,45 +102,205 @@ async fn reconcile_indexer(
         ));
     }
 
-    let (server_cert, server_key) = TlsManager::generate_server_cert(
-        &ca_cert,
-        &ca_key,
-        &format!("{}.{}.svc.cluster.local", name, ns),
-        alt_names,
-    )?;
+    let server_keys = ["ca.crt", "tls.crt", "tls.key"];
+    let admin_keys = ["ca.crt", "tls.crt", "tls.key"];
 
-    let (admin_cert, admin_key) = TlsManager::generate_server_cert(
-        &ca_cert,
-        &ca_key,
-        "admin",
-        vec!["admin".to_string()],
-    )?;
+    let ca_ref = tls_config.and_then(|t| t.ca_ref.as_ref());
+    if let Some(ca_ref) = ca_ref {
+        match resolve_wazuh_ca(client.clone(), &ns, ca_ref).await? {
+            ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
+                let server_ready = secret_api
+                    .get(&tls_secret_name)
+                    .await
+                    .ok()
+                    .map_or(false, |s| secret_has_keys(&s, &server_keys));
+                let admin_ready = secret_api
+                    .get(&admin_tls_secret_name)
+                    .await
+                    .ok()
+                    .map_or(false, |s| secret_has_keys(&s, &admin_keys));
 
-    let mut tls_data = BTreeMap::new();
-    tls_data.insert("root-ca.pem".to_string(), ca_cert);
-    tls_data.insert("indexer.pem".to_string(), server_cert);
-    tls_data.insert("indexer-key.pem".to_string(), server_key);
-    tls_data.insert("admin.pem".to_string(), admin_cert);
-    tls_data.insert("admin-key.pem".to_string(), admin_key);
+                if !server_ready || !admin_ready {
+                    let (server_cert, server_key) = TlsManager::generate_server_cert(
+                        &ca_cert,
+                        &ca_key,
+                        &format!("{}.{}.svc.cluster.local", name, ns),
+                        alt_names.clone(),
+                    )?;
+                    let (admin_cert, admin_key) = TlsManager::generate_server_cert(
+                        &ca_cert,
+                        &ca_key,
+                        "admin",
+                        vec!["admin".to_string()],
+                    )?;
 
-    let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
-    let tls_secret = k8s_openapi::api::core::v1::Secret {
-        metadata: kube::api::ObjectMeta {
-            name: Some(format!("{}-tls", name)),
-            owner_references: owner_ref,
-            ..Default::default()
-        },
-        string_data: Some(tls_data),
-        ..Default::default()
-    };
+                    let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+                    let mut server_data = BTreeMap::new();
+                    server_data.insert("ca.crt".to_string(), ca_cert.clone());
+                    server_data.insert("tls.crt".to_string(), server_cert);
+                    server_data.insert("tls.key".to_string(), server_key);
+                    let server_secret = k8s_openapi::api::core::v1::Secret {
+                        metadata: kube::api::ObjectMeta {
+                            name: Some(tls_secret_name.clone()),
+                            owner_references: owner_ref.clone(),
+                            ..Default::default()
+                        },
+                        string_data: Some(server_data),
+                        ..Default::default()
+                    };
 
-    secret_api
-        .patch(
-            &format!("{}-tls", name),
-            &PatchParams::apply("wazuh-operator"),
-            &Patch::Apply(&tls_secret),
-        )
-        .await?;
+                    let mut admin_data = BTreeMap::new();
+                    admin_data.insert("ca.crt".to_string(), ca_cert);
+                    admin_data.insert("tls.crt".to_string(), admin_cert);
+                    admin_data.insert("tls.key".to_string(), admin_key);
+                    let admin_secret = k8s_openapi::api::core::v1::Secret {
+                        metadata: kube::api::ObjectMeta {
+                            name: Some(admin_tls_secret_name.clone()),
+                            owner_references: owner_ref,
+                            ..Default::default()
+                        },
+                        string_data: Some(admin_data),
+                        ..Default::default()
+                    };
+
+                    secret_api
+                        .patch(
+                            &tls_secret_name,
+                            &PatchParams::apply("wazuh-operator"),
+                            &Patch::Apply(&server_secret),
+                        )
+                        .await?;
+                    secret_api
+                        .patch(
+                            &admin_tls_secret_name,
+                            &PatchParams::apply("wazuh-operator"),
+                            &Patch::Apply(&admin_secret),
+                        )
+                        .await?;
+                }
+            }
+            ResolvedCa::CertManager { issuer_ref } => {
+                let cert_api: Api<Certificate> = Api::namespaced(client.clone(), &ns);
+                let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+
+                let server_cert = Certificate {
+                    metadata: kube::api::ObjectMeta {
+                        name: Some(tls_secret_name.clone()),
+                        owner_references: owner_ref.clone(),
+                        ..Default::default()
+                    },
+                    spec: crate::cert_manager::CertificateSpec {
+                        secret_name: tls_secret_name.clone(),
+                        issuer_ref: issuer_ref.clone(),
+                        common_name: Some(format!("{}.{}.svc.cluster.local", name, ns)),
+                        dns_names: alt_names.clone(),
+                        usages: vec!["server auth".to_string(), "client auth".to_string()],
+                    },
+                };
+
+                let admin_cert = Certificate {
+                    metadata: kube::api::ObjectMeta {
+                        name: Some(admin_tls_secret_name.clone()),
+                        owner_references: owner_ref,
+                        ..Default::default()
+                    },
+                    spec: crate::cert_manager::CertificateSpec {
+                        secret_name: admin_tls_secret_name.clone(),
+                        issuer_ref,
+                        common_name: Some("admin".to_string()),
+                        dns_names: Vec::new(),
+                        usages: vec!["client auth".to_string()],
+                    },
+                };
+
+                cert_api
+                    .patch(
+                        &tls_secret_name,
+                        &PatchParams::apply("wazuh-operator"),
+                        &Patch::Apply(&server_cert),
+                    )
+                    .await?;
+                cert_api
+                    .patch(
+                        &admin_tls_secret_name,
+                        &PatchParams::apply("wazuh-operator"),
+                        &Patch::Apply(&admin_cert),
+                    )
+                    .await?;
+            }
+        }
+    } else {
+        let server_ready = secret_api
+            .get(&tls_secret_name)
+            .await
+            .ok()
+            .map_or(false, |s| secret_has_keys(&s, &server_keys));
+        let admin_ready = secret_api
+            .get(&admin_tls_secret_name)
+            .await
+            .ok()
+            .map_or(false, |s| secret_has_keys(&s, &admin_keys));
+
+        if !server_ready || !admin_ready {
+            let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+            let (server_cert, server_key) = TlsManager::generate_server_cert(
+                &ca_cert,
+                &ca_key,
+                &format!("{}.{}.svc.cluster.local", name, ns),
+                alt_names.clone(),
+            )?;
+            let (admin_cert, admin_key) = TlsManager::generate_server_cert(
+                &ca_cert,
+                &ca_key,
+                "admin",
+                vec!["admin".to_string()],
+            )?;
+
+            let owner_ref = indexer.controller_owner_ref(&()).map(|o| vec![o]);
+            let mut server_data = BTreeMap::new();
+            server_data.insert("ca.crt".to_string(), ca_cert.clone());
+            server_data.insert("tls.crt".to_string(), server_cert);
+            server_data.insert("tls.key".to_string(), server_key);
+            let server_secret = k8s_openapi::api::core::v1::Secret {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(tls_secret_name.clone()),
+                    owner_references: owner_ref.clone(),
+                    ..Default::default()
+                },
+                string_data: Some(server_data),
+                ..Default::default()
+            };
+
+            let mut admin_data = BTreeMap::new();
+            admin_data.insert("ca.crt".to_string(), ca_cert);
+            admin_data.insert("tls.crt".to_string(), admin_cert);
+            admin_data.insert("tls.key".to_string(), admin_key);
+            let admin_secret = k8s_openapi::api::core::v1::Secret {
+                metadata: kube::api::ObjectMeta {
+                    name: Some(admin_tls_secret_name.clone()),
+                    owner_references: owner_ref,
+                    ..Default::default()
+                },
+                string_data: Some(admin_data),
+                ..Default::default()
+            };
+
+            secret_api
+                .patch(
+                    &tls_secret_name,
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&server_secret),
+                )
+                .await?;
+            secret_api
+                .patch(
+                    &admin_tls_secret_name,
+                    &PatchParams::apply("wazuh-operator"),
+                    &Patch::Apply(&admin_secret),
+                )
+                .await?;
+        }
+    }
 
     // 1. Generate and Apply ConfigMap
     let cm = generate_configmap(&indexer)?;
@@ -182,7 +349,7 @@ async fn reconcile_indexer(
         name
     );
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 async fn cleanup_indexer(
@@ -289,14 +456,14 @@ cluster.initial_master_nodes: [{}]
 path.data: /var/lib/wazuh-indexer
 path.logs: /var/log/wazuh-indexer
 plugins.security.disabled: false
-plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
-plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
-plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
+plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/tls.crt
+plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/tls.key
+plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/ca.crt
 plugins.security.ssl.transport.enforce_hostname_verification: false
 plugins.security.ssl.http.enabled: true
-plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
-plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
-plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
+plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/tls.crt
+plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/tls.key
+plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/ca.crt
 plugins.security.allow_unsafe_democertificates: true
 plugins.security.authcz.admin_dn:
   - CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US
@@ -424,6 +591,12 @@ fn generate_service(indexer: &WazuhIndexerCluster) -> Result<Service> {
 
 fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
     let name = indexer.name_any();
+    let tls_secret_name = indexer
+        .spec
+        .tls
+        .as_ref()
+        .and_then(|t| t.cert_secret.clone())
+        .unwrap_or_else(|| format!("{}-tls", name));
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer".to_string());
     labels.insert("cluster".to_string(), name.clone());
@@ -569,7 +742,7 @@ fn generate_statefulset(indexer: &WazuhIndexerCluster) -> Result<StatefulSet> {
                         k8s_openapi::api::core::v1::Volume {
                             name: "tls".to_string(),
                             secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
-                                secret_name: Some(format!("{}-tls", name)),
+                                secret_name: Some(tls_secret_name),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -621,4 +794,20 @@ pub fn error_policy(
 ) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
+}
+
+fn secret_has_keys(
+    secret: &k8s_openapi::api::core::v1::Secret,
+    keys: &[&str],
+) -> bool {
+    keys.iter().all(|key| {
+        secret
+            .data
+            .as_ref()
+            .map_or(false, |data| data.contains_key(*key))
+            || secret
+                .string_data
+                .as_ref()
+                .map_or(false, |data| data.contains_key(*key))
+    })
 }

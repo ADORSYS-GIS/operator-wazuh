@@ -25,3 +25,5 @@ pub mod tls;
 pub use client::ClientManager;
 pub use controller::WazuhController;
 pub use error::{Error, Result};
+pub mod ca;
+pub mod cert_manager;

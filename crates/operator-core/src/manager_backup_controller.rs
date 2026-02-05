@@ -73,7 +73,7 @@ async fn reconcile_backup(
         )
         .await?;
 
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(Duration::from_secs(60)))
 }
 
 async fn cleanup_backup(
