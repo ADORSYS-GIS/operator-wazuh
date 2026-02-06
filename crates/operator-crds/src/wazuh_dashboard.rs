@@ -86,6 +86,22 @@ pub struct ManagerRef {
     pub name: String,
     /// Namespace of the manager cluster
     pub namespace: Option<String>,
+    /// Manager API auth reference
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<ManagerAuthRef>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct ManagerAuthRef {
+    /// Secret reference for manager API credentials
+    #[serde(rename = "secretRef")]
+    pub secret_ref: SecretNameRef,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct SecretNameRef {
+    /// Secret name in the same namespace
+    pub name: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

@@ -92,22 +92,52 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
     if !workloads.items.is_empty() {
         for manager in workloads {
+            let manager_name = manager.name_any();
+            let workload_name = manager
+                .spec
+                .workload
+                .as_ref()
+                .and_then(|w| w.name.clone())
+                .unwrap_or_else(|| manager_name.clone());
+            let cluster_name = manager.spec.cluster_ref.name.clone();
+
+            let mut selector_labels = BTreeMap::new();
+            selector_labels.insert("app".to_string(), "wazuh-manager".to_string());
+            selector_labels.insert("cluster".to_string(), cluster_name);
+            selector_labels.insert("manager".to_string(), manager_name.clone());
+            selector_labels.insert(
+                "role".to_string(),
+                match manager.spec.role {
+                    operator_crds::WazuhManagerRole::Master => "master".to_string(),
+                    operator_crds::WazuhManagerRole::Worker => "worker".to_string(),
+                },
+            );
+            selector_labels.insert("workload".to_string(), workload_name.clone());
+            if let Some(ns_label) = manager.namespace() {
+                selector_labels.insert("namespace".to_string(), ns_label);
+            }
+            if let Some(extra) = &manager.metadata.labels {
+                for (k, v) in extra {
+                    selector_labels.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+
             let ossec_conf = ConfigAggregator::aggregate_configs(
                 client.clone(),
                 &ns,
-                manager.metadata.labels.as_ref(),
+                Some(&selector_labels),
             )
             .await?;
             let rules = ConfigAggregator::aggregate_rules(
                 client.clone(),
                 &ns,
-                manager.metadata.labels.as_ref(),
+                Some(&selector_labels),
             )
             .await?;
             let decoders = ConfigAggregator::aggregate_decoders(
                 client.clone(),
                 &ns,
-                manager.metadata.labels.as_ref(),
+                Some(&selector_labels),
             )
             .await?;
 
@@ -117,7 +147,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             let cm = ConfigMap {
                 metadata: kube::api::ObjectMeta {
-                    name: Some(format!("{}-config", manager.name_any())),
+                    name: Some(format!("{}-config", manager_name)),
                     owner_references: manager.controller_owner_ref(&()).map(|o| vec![o]),
                     ..Default::default()
                 },
@@ -127,7 +157,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             cm_api
                 .patch(
-                    &format!("{}-config", manager.name_any()),
+                    &format!("{}-config", manager_name),
                     &PatchParams::apply("wazuh-operator"),
                     &Patch::Apply(&cm),
                 )
@@ -145,7 +175,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             cm_api
                 .patch(
-                    &format!("{}-rules", manager.name_any()),
+                    &format!("{}-rules", manager_name),
                     &PatchParams::apply("wazuh-operator"),
                     &Patch::Apply(&rules_cm),
                 )
@@ -163,7 +193,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             cm_api
                 .patch(
-                    &format!("{}-decoders", manager.name_any()),
+                    &format!("{}-decoders", manager_name),
                     &PatchParams::apply("wazuh-operator"),
                     &Patch::Apply(&decoders_cm),
                 )
@@ -185,7 +215,7 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
             sts_api
-                .patch(&manager.name_any(), &PatchParams::default(), &Patch::Merge(&patch))
+                .patch(&workload_name, &PatchParams::default(), &Patch::Merge(&patch))
                 .await?;
         }
 

@@ -6,8 +6,9 @@ use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{
-    Capabilities, ConfigMap, Container, EnvVar, Pod, PodSecurityContext, PodSpec, PodTemplateSpec,
-    Secret, SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount,
+    Capabilities, ConfigMap, Container, EnvVar, EnvVarSource, Pod, PodSecurityContext, PodSpec,
+    PodTemplateSpec, Secret, SecretKeySelector, SecurityContext, Service, ServicePort, ServiceSpec,
+    VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
@@ -21,6 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub struct ManagerContext {
     pub client: kube::Client,
@@ -70,6 +72,17 @@ async fn reconcile_manager(
     info!("Reconciling WazuhManagerCluster: {}/{}", ns, name);
 
     let client = ctx.client.clone();
+    let api_secret_name = manager
+        .spec
+        .api_secret_ref
+        .as_ref()
+        .map(|s| s.name.clone())
+        .ok_or_else(|| {
+            Error::ValidationError(format!(
+                "Missing API credentials secret for manager cluster {}/{}: set spec.apiSecretRef.name",
+                ns, name
+            ))
+        })?;
 
     // 1. Resolve indexer reference
     let indexer = resolve_indexer(&manager, client.clone()).await?;
@@ -223,15 +236,22 @@ async fn reconcile_manager(
     }
 
     // 3. Generate Cluster Key Secret
-    let key_secret = generate_cluster_key_secret(&manager)?;
+    let key_secret_name = format!("{}-key", name);
+    let existing_key_secret = match secret_api.get(&key_secret_name).await {
+        Ok(s) => Some(s),
+        Err(kube::Error::Api(ae)) if ae.code == 404 => None,
+        Err(e) => return Err(e.into()),
+    };
+    let key_secret = generate_cluster_key_secret(&manager, existing_key_secret.as_ref())?;
 
-    secret_api
+    let key_secret = secret_api
         .patch(
-            &format!("{}-key", name),
+            &key_secret_name,
             &PatchParams::apply("wazuh-operator"),
             &Patch::Apply(&key_secret),
         )
         .await?;
+    let key_secret_rv = key_secret.metadata.resource_version.clone().unwrap_or_default();
 
     info!("Successfully reconciled Cluster Key Secret for {}", name);
 
@@ -329,7 +349,13 @@ async fn reconcile_manager(
     // 6. Create StatefulSet (legacy path only)
     if !has_workloads {
         let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
-        let sts = generate_manager_statefulset(&manager, &indexer, &tls_secret_rv)?;
+        let sts = generate_manager_statefulset(
+            &manager,
+            &indexer,
+            &api_secret_name,
+            &tls_secret_rv,
+            &key_secret_rv,
+        )?;
 
         sts_api
             .patch(
@@ -447,7 +473,9 @@ fn pod_ready(pod: &Pod) -> bool {
 fn generate_manager_statefulset(
     manager: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
+    api_secret_name: &str,
     tls_secret_rv: &str,
+    key_secret_rv: &str,
 ) -> Result<StatefulSet> {
     let name = manager.name_any();
     let nginx_enabled = manager
@@ -473,10 +501,10 @@ fn generate_manager_statefulset(
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
-    let mut containers = vec![Container {
-        name: "manager".to_string(),
-        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
-        env: Some(vec![
+	    let mut containers = vec![Container {
+	        name: "manager".to_string(),
+	        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
+	        env: Some(vec![
             EnvVar {
                 name: "INDEXER_URL".to_string(),
                 value: Some(format!(
@@ -484,6 +512,11 @@ fn generate_manager_statefulset(
                     indexer.name_any(),
                     indexer.namespace().unwrap()
                 )),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_USERNAME".to_string(),
+                value: Some("admin".to_string()),
                 ..Default::default()
             },
             EnvVar {
@@ -496,41 +529,74 @@ fn generate_manager_statefulset(
                 value: Some("admin".to_string()),
                 ..Default::default()
             },
-        ]),
-        security_context: Some(SecurityContext {
-            capabilities: Some(Capabilities {
-                add: Some(vec!["SYS_CHROOT".to_string()]),
+            EnvVar {
+                name: "API_USERNAME".to_string(),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: api_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
+            },
+	            EnvVar {
+	                name: "API_PASSWORD".to_string(),
+	                value_from: Some(EnvVarSource {
+	                    secret_key_ref: Some(SecretKeySelector {
+	                        key: "password".to_string(),
+	                        name: api_secret_name.to_string(),
+	                        optional: Some(false),
+	                    }),
+	                    ..Default::default()
+	                }),
+	                ..Default::default()
+	            },
+	            EnvVar {
+	                name: "WAZUH_CLUSTER_KEY".to_string(),
+	                value_from: Some(EnvVarSource {
+	                    secret_key_ref: Some(SecretKeySelector {
+	                        key: "cluster-key".to_string(),
+	                        name: format!("{}-key", name),
+	                        optional: Some(false),
+	                    }),
+	                    ..Default::default()
+	                }),
+	                ..Default::default()
+	            },
+	        ]),
+	        security_context: Some(SecurityContext {
+	            capabilities: Some(Capabilities {
+	                add: Some(vec!["SYS_CHROOT".to_string()]),
+	                ..Default::default()
+	            }),
             ..Default::default()
         }),
-        volume_mounts: Some(vec![
-            VolumeMount {
-                name: "config".to_string(),
-                mount_path: "/var/ossec/etc/ossec.conf".to_string(),
-                sub_path: Some("ossec.conf".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "rules".to_string(),
-                mount_path: "/var/ossec/etc/rules/local_rules.xml".to_string(),
-                sub_path: Some("local_rules.xml".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "decoders".to_string(),
-                mount_path: "/var/ossec/etc/decoders/local_decoder.xml".to_string(),
-                sub_path: Some("local_decoder.xml".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "tls".to_string(),
-                mount_path: "/var/ossec/etc/certs".to_string(),
-                ..Default::default()
-            },
-        ]),
-        ..Default::default()
-    }];
+	        volume_mounts: Some(vec![
+	            VolumeMount {
+	                name: "config".to_string(),
+	                mount_path: "/wazuh-config-mount/etc".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "rules".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "decoders".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "tls".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
+	                ..Default::default()
+	            },
+	        ]),
+	        ..Default::default()
+	    }];
 
     if nginx_enabled {
         containers.push(Container {
@@ -629,6 +695,10 @@ fn generate_manager_statefulset(
                             "wazuh.adorsys.team/tls-secret-rv".to_string(),
                             tls_secret_rv.to_string(),
                         );
+                        ann.insert(
+                            "wazuh.adorsys.team/cluster-key-secret-rv".to_string(),
+                            key_secret_rv.to_string(),
+                        );
                         ann
                     }),
                     ..Default::default()
@@ -649,15 +719,27 @@ fn generate_manager_statefulset(
     })
 }
 
-fn generate_cluster_key_secret(manager: &WazuhManagerCluster) -> Result<Secret> {
+fn generate_cluster_key_secret(
+    manager: &WazuhManagerCluster,
+    existing: Option<&Secret>,
+) -> Result<Secret> {
     let name = manager.name_any();
     let mut data = BTreeMap::new();
 
-    // TODO
-    //  In a real implementation, we would check if the secret already exists
-    //  and reuse the key. For now, we generate a new one.
-    let key = "REPLACE_WITH_RANDOM_KEY_32_CHARS_LONG";
-    data.insert("cluster-key".to_string(), key.to_string());
+    let existing_key = existing
+        .and_then(|s| {
+            if let Some(string_data) = s.string_data.as_ref() {
+                return string_data.get("cluster-key").cloned();
+            }
+            let data = s.data.as_ref()?;
+            let bs = data.get("cluster-key")?;
+            String::from_utf8(bs.0.clone()).ok()
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() == 32);
+
+    let key = existing_key.unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+    data.insert("cluster-key".to_string(), key);
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -865,32 +947,41 @@ fn generate_config_map(
     let indexer_name = indexer.name_any();
     let indexer_ns = indexer.namespace().unwrap();
 
-    let ossec_conf = format!(
-        r#"<ossec_config>
-  <cluster>
-    <name>wazuh</name>
-    <node_name>NODE_NAME</node_name>
-    <node_type>NODE_TYPE</node_type>
-    <key>CLUSTER_KEY</key>
-    <port>1516</port>
-    <bind_addr>0.0.0.0</bind_addr>
-    <nodes>
-        <node>{}-headless.{}.svc.cluster.local</node>
-    </nodes>
-    <hidden>no</hidden>
-  </cluster>
-  <indexer>
-    <enabled>yes</enabled>
-    <hosts>
-      <host>https://{}.{}.svc.cluster.local:9200</host>
+	    let ossec_conf = format!(
+	        r#"<ossec_config>
+	  <cluster>
+	    <name>wazuh</name>
+	    <node_name>to_be_replaced_by_hostname</node_name>
+	    <node_type>NODE_TYPE</node_type>
+	    <key>to_be_replaced_by_cluster_key</key>
+	    <port>1516</port>
+	    <bind_addr>0.0.0.0</bind_addr>
+	    <nodes>
+	        <node>{}-headless.{}.svc.cluster.local</node>
+	    </nodes>
+	    <hidden>no</hidden>
+	  </cluster>
+	  <remote>
+	    <connection>secure</connection>
+	    <port>1514</port>
+	    <protocol>tcp</protocol>
+	  </remote>
+	  <auth>
+	    <disabled>no</disabled>
+	    <port>1515</port>
+	  </auth>
+	  <indexer>
+	    <enabled>yes</enabled>
+	    <hosts>
+	      <host>https://{}.{}.svc.cluster.local:9200</host>
     </hosts>
   </indexer>
-</ossec_config>"#,
-        name,
-        manager.namespace().unwrap(),
-        indexer_name,
-        indexer_ns
-    );
+	</ossec_config>"#,
+	        name,
+	        manager.namespace().unwrap(),
+	        indexer_name,
+	        indexer_ns
+	    );
 
     let mut data = BTreeMap::new();
     data.insert("ossec.conf".to_string(), ossec_conf);
@@ -929,7 +1020,7 @@ fn generate_rules_config_map(manager: &WazuhManagerCluster) -> Result<ConfigMap>
     let mut data = BTreeMap::new();
     data.insert(
         "local_rules.xml".to_string(),
-        "<group name=\"local, \">\n</group>".to_string(),
+        "<group name=\"local,\">\n</group>".to_string(),
     );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
@@ -966,7 +1057,7 @@ fn generate_decoders_config_map(manager: &WazuhManagerCluster) -> Result<ConfigM
     let mut data = BTreeMap::new();
     data.insert(
         "local_decoder.xml".to_string(),
-        "<decoder name=\"local_decoder\">\n</decoder>".to_string(),
+        "<decoder name=\"local_decoder\">\n  <prematch>^$</prematch>\n</decoder>".to_string(),
     );
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);

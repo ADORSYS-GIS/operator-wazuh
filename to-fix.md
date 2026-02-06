@@ -1,6 +1,6 @@
 # to-fix
 
-Date: 2026-02-05
+Date: 2026-02-06
 Cluster: docker-desktop (M2/arm64)
 Namespace under test: `wazuh-test`
 Deploy sources: `examples/ca`, `examples/simple-stack`, `examples/security`, `examples/backups`
@@ -13,47 +13,32 @@ Deploy sources: `examples/ca`, `examples/simple-stack`, `examples/security`, `ex
   - latest jobs complete (`Complete 1/1`)
   - `securityadmin.sh` succeeds (`Done with success`).
 - Indexer and Dashboard are running and reachable via their services.
+- Wazuh Managers no longer crash on startup:
+  - Baseline `<remote>` (1514/tcp secure) and `<auth>` (1515) are present in generated `ossec.conf`.
+  - Cluster placeholders now match the image init expectations and the cluster key is injected via `WAZUH_CLUSTER_KEY`.
+  - Config files are mounted via `/wazuh-config-mount/...` so init scripts can copy + `sed -i` the real `/var/ossec/etc/ossec.conf`.
+  - Default `local_decoder.xml` and `local_rules.xml` are valid minimal files (no more `wazuh-testrule` config errors).
+- `WazuhListener` attach mode works end-to-end for dynamic ports:
+  - `examples/dynamic-ports/listener.yaml` creates a listener that patches `Service/wazuh-manager` ports.
+  - Listener entries are appended to `ossec.conf` and the manager StatefulSets expose the corresponding container ports.
 
 ## Remaining issues (not working)
 
-## 1) Wazuh Manager container crashes on both master and worker (blocking)
+## 1) Startup noise (non-blocking)
 
-- Symptom:
-  - `wazuh-manager-master-0` and `wazuh-manager-worker-0` are `1/2` with `CrashLoopBackOff`.
-- Evidence (manager container logs):
-  - `wazuh-remoted: CRITICAL: Remoted connection is not configured.`
-  - `wazuh-remoted: Configuration error. Exiting`
-- Current generated config:
-  - `ConfigMap/wazuh-manager-master-config` and `ConfigMap/wazuh-manager-worker-config` contain a very minimal `ossec.conf` with only `<cluster>` and `<indexer>` blocks.
-- Likely root cause:
-  - The generated `ossec.conf` is missing required manager/remoted sections for this image startup path.
-- Fix direction:
-  - Generate a complete manager-safe `ossec.conf` baseline and merge cluster/indexer/listener/rule/decoder overlays instead of replacing config with a minimal file.
+- Managers still log a large number of `chown: ... Read-only file system` lines for serviceaccount and `/wazuh-config-mount/*` paths because those are Kubernetes-projected/configmap/secret volumes.
+- This is noisy but does not block startup anymore; if we want it cleaner, we would need to adjust the image init behavior (not owned by the operator) or add an init wrapper to skip those ownership operations.
 
-## 2) Manager startup script noise and config assumptions (non-blocking but high noise)
+## 2) Listener create-mode selectors (coverage gap)
 
-- Observed on both manager pods:
-  - many `Read-only file system` warnings from `chown`
-  - `sed: cannot rename ... Device or resource busy`
-  - `wazuh-keystore ... Error reading from stdin.`
-- Impact:
-  - These are noisy and may hide real failures; primary blocker is still `wazuh-remoted` config error.
-- Fix direction:
-  - Align mounted paths and init behavior with image expectations, or disable unsupported init operations when using read-only mounted config files.
-
-## 3) Listener behavior not yet validated against multi-worker selectors (coverage gap)
-
-- Current test deployment (`examples/*`) does not create `WazuhListener` objects, so listener attach/create behavior was not exercised in this run.
-- Need targeted test:
-  - create listeners selecting multiple managers/workers
-  - verify ports are reflected in managed services as intended.
+- `Attach` mode (cluster-wide) is validated.
+- `Create` mode (per-selector dedicated Service(s), including `headless: true`) is not yet validated in this test run.
 
 ## Current workload status snapshot
 
 - Running:
   - `wazuh-indexer-0` (`1/1`)
   - `wazuh-dashboard-*` (`2/2`)
+  - `wazuh-manager-master-0` (`2/2`)
+  - `wazuh-manager-worker-0` (`2/2`)
   - `wazuh-indexer-config-cronjob-*` jobs complete successfully.
-- Not healthy:
-  - `wazuh-manager-master-0` (`1/2`, CrashLoopBackOff)
-  - `wazuh-manager-worker-0` (`1/2`, CrashLoopBackOff)

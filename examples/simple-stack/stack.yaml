@@ -18,6 +18,15 @@ stringData:
   username: admin
   password: admin
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wazuh-manager-api-auth
+  namespace: wazuh-test
+stringData:
+  username: wazuh-api
+  password: "XoX2ae0w^T%9BTyj"
+---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
 metadata:
@@ -26,6 +35,8 @@ metadata:
 spec:
   replicas: 1
   version: "4.14.0"
+  apiSecretRef:
+    name: wazuh-manager-api-auth
   indexer_cluster:
     name: wazuh-indexer
 ---
@@ -63,6 +74,9 @@ spec:
     name: wazuh-indexer
   manager_cluster:
     name: wazuh-manager
+    auth:
+      secretRef:
+        name: wazuh-manager-api-auth
   auth:
     enabled: true
     auth_secret: wazuh-dashboard-opensearch-auth

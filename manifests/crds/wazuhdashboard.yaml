@@ -55,6 +55,22 @@ spec:
                 description: Reference to manager cluster
                 nullable: true
                 properties:
+                  auth:
+                    description: Manager API auth reference
+                    nullable: true
+                    properties:
+                      secretRef:
+                        description: Secret reference for manager API credentials
+                        properties:
+                          name:
+                            description: Secret name in the same namespace
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - secretRef
+                    type: object
                   name:
                     description: Name of the manager cluster
                     type: string

@@ -6,7 +6,7 @@ metadata:
 spec:
   wazuhIndexerClusterRef:
     name: wazuh-indexer
-  schedule: "*/1 * * * *"
+  schedule: "*/10 * * * *"
   internal_users:
     kibanaserver:
       hashSecretRef:

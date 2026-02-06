@@ -36,6 +36,9 @@ pub struct WazuhManagerSpec {
     /// Disable default PVC templates
     #[serde(rename = "disableDefaultPvc", default, skip_serializing_if = "Option::is_none")]
     pub disable_default_pvc: Option<bool>,
+    /// Secret reference for manager API credentials
+    #[serde(rename = "apiSecretRef", default, skip_serializing_if = "Option::is_none")]
+    pub api_secret_ref: Option<SecretNameRef>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -44,6 +47,12 @@ pub struct WazuhManagerClusterRef {
     pub name: String,
     /// Namespace of the manager cluster
     pub namespace: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct SecretNameRef {
+    /// Secret name in the same namespace
+    pub name: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -60,9 +69,6 @@ pub struct NginxConfig {
     /// Custom nginx.conf content
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_config: Option<String>,
-    /// Optional CRL URL to fetch into nginx at startup
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub crl_url: Option<String>,
     /// Nginx container image config
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<ImageConfig>,

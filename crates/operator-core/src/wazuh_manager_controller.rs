@@ -5,7 +5,8 @@ use crate::error::{Error, Result};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PodSecurityContext, PodSpec, PodTemplateSpec, SecurityContext, Volume, VolumeMount,
+    PodSecurityContext, PodSpec, PodTemplateSpec, SecretKeySelector, SecurityContext, Volume,
+    VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::api::{Api, Patch, PatchParams, Resource};
@@ -81,6 +82,7 @@ async fn reconcile_manager(
 
     // 2. Resolve indexer reference from cluster
     let indexer = resolve_indexer(&cluster, client.clone()).await?;
+    let api_secret_name = resolve_manager_api_secret_name(&manager, &cluster)?;
 
     // 3. Build master nodes list
     let master_nodes = collect_master_nodes(client.clone(), &cluster_name, &cluster_ns).await?;
@@ -100,13 +102,13 @@ async fn reconcile_manager(
     if rules.is_empty() {
         rules.insert(
             "local_rules.xml".to_string(),
-            "<group name=\"local, \">\n</group>".to_string(),
+            "<group name=\"local,\">\n</group>".to_string(),
         );
     }
     if decoders.is_empty() {
         decoders.insert(
             "local_decoder.xml".to_string(),
-            "<decoder name=\"local_decoder\">\n</decoder>".to_string(),
+            "<decoder name=\"local_decoder\">\n  <prematch>^$</prematch>\n</decoder>".to_string(),
         );
     }
 
@@ -170,6 +172,13 @@ async fn reconcile_manager(
         .ok()
         .and_then(|s| s.metadata.resource_version)
         .unwrap_or_else(|| "missing".to_string());
+    let key_secret_name = format!("{}-key", cluster_name);
+    let key_secret_rv = secret_api
+        .get(&key_secret_name)
+        .await
+        .ok()
+        .and_then(|s| s.metadata.resource_version)
+        .unwrap_or_else(|| "missing".to_string());
 
     let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
     let sts = generate_statefulset(
@@ -177,7 +186,9 @@ async fn reconcile_manager(
         &workload_name,
         &cluster,
         &indexer,
+        &api_secret_name,
         &tls_secret_rv,
+        &key_secret_rv,
         &config_hash,
         &listener_ports,
     )?;
@@ -311,6 +322,27 @@ fn build_selector_labels(
     labels
 }
 
+fn resolve_manager_api_secret_name(
+    manager: &WazuhManager,
+    cluster: &WazuhManagerCluster,
+) -> Result<String> {
+    if let Some(secret_ref) = manager.spec.api_secret_ref.as_ref() {
+        if !secret_ref.name.trim().is_empty() {
+            return Ok(secret_ref.name.clone());
+        }
+    }
+    if let Some(secret_ref) = cluster.spec.api_secret_ref.as_ref() {
+        if !secret_ref.name.trim().is_empty() {
+            return Ok(secret_ref.name.clone());
+        }
+    }
+    Err(Error::ValidationError(format!(
+        "Missing API credentials secret for manager {}/{}: set spec.apiSecretRef.name on WazuhManager or WazuhManagerCluster",
+        manager.namespace().unwrap_or_default(),
+        manager.name_any()
+    )))
+}
+
 fn merge_ossec_conf(base: String, extra: &str) -> String {
     let extra = extra.trim();
     if extra.is_empty() {
@@ -349,9 +381,9 @@ fn build_ossec_conf(
         r#"<ossec_config>
   <cluster>
     <name>wazuh</name>
-    <node_name>NODE_NAME</node_name>
+    <node_name>to_be_replaced_by_hostname</node_name>
     <node_type>{}</node_type>
-    <key>CLUSTER_KEY</key>
+    <key>to_be_replaced_by_cluster_key</key>
     <port>1516</port>
     <bind_addr>0.0.0.0</bind_addr>
     <nodes>
@@ -359,6 +391,15 @@ fn build_ossec_conf(
     </nodes>
     <hidden>no</hidden>
   </cluster>
+  <remote>
+    <connection>secure</connection>
+    <port>1514</port>
+    <protocol>tcp</protocol>
+  </remote>
+  <auth>
+    <disabled>no</disabled>
+    <port>1515</port>
+  </auth>
   <indexer>
     <enabled>yes</enabled>
     <hosts>
@@ -463,13 +504,6 @@ fn generate_nginx_config_map(manager: &WazuhManager) -> Result<ConfigMap> {
         .nginx
         .as_ref()
         .and_then(|n| n.custom_config.clone());
-    let crl_url = manager
-        .spec
-        .nginx
-        .as_ref()
-        .and_then(|n| n.crl_url.clone())
-        .unwrap_or_default();
-
     let default_conf = r#"
 events {
     worker_connections 1024;
@@ -482,7 +516,6 @@ http {
         ssl_certificate_key /etc/nginx/certs/tls.key;
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
-        ssl_crl /etc/nginx/crl/crl.pem;
 
         location / {
             proxy_pass http://127.0.0.1:55000;
@@ -505,7 +538,6 @@ http {
         "nginx.conf".to_string(),
         custom.unwrap_or_else(|| default_conf.to_string()),
     );
-    data.insert("crl_url".to_string(), crl_url);
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
@@ -525,7 +557,9 @@ fn generate_statefulset(
     workload_name: &str,
     cluster: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
+    api_secret_name: &str,
     tls_secret_rv: &str,
+    key_secret_rv: &str,
     config_hash: &str,
     listener_ports: &[ListenerPort],
 ) -> Result<StatefulSet> {
@@ -582,15 +616,15 @@ fn generate_statefulset(
         });
     }
 
-    let mut containers = vec![Container {
-        name: "manager".to_string(),
-        image: Some(format!("wazuh/wazuh-manager:{}", cluster.spec.version)),
+	    let mut containers = vec![Container {
+	        name: "manager".to_string(),
+	        image: Some(format!("wazuh/wazuh-manager:{}", cluster.spec.version)),
         ports: if manager_ports.is_empty() {
             None
         } else {
             Some(manager_ports)
         },
-        env: Some(vec![
+	        env: Some(vec![
             EnvVar {
                 name: "INDEXER_URL".to_string(),
                 value: Some(format!(
@@ -598,6 +632,11 @@ fn generate_statefulset(
                     indexer.name_any(),
                     indexer.namespace().unwrap()
                 )),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "INDEXER_USERNAME".to_string(),
+                value: Some("admin".to_string()),
                 ..Default::default()
             },
             EnvVar {
@@ -611,17 +650,53 @@ fn generate_statefulset(
                 ..Default::default()
             },
             EnvVar {
-                name: "NODE_NAME".to_string(),
+                name: "API_USERNAME".to_string(),
                 value_from: Some(EnvVarSource {
-                    field_ref: Some(ObjectFieldSelector {
-                        field_path: "metadata.name".to_string(),
-                        ..Default::default()
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: api_secret_name.to_string(),
+                        optional: Some(false),
                     }),
                     ..Default::default()
                 }),
                 ..Default::default()
             },
-        ]),
+	            EnvVar {
+	                name: "API_PASSWORD".to_string(),
+	                value_from: Some(EnvVarSource {
+	                    secret_key_ref: Some(SecretKeySelector {
+	                        key: "password".to_string(),
+	                        name: api_secret_name.to_string(),
+	                        optional: Some(false),
+	                    }),
+	                    ..Default::default()
+	                }),
+	                ..Default::default()
+	            },
+	            EnvVar {
+	                name: "WAZUH_CLUSTER_KEY".to_string(),
+	                value_from: Some(EnvVarSource {
+	                    secret_key_ref: Some(SecretKeySelector {
+	                        key: "cluster-key".to_string(),
+	                        name: format!("{}-key", cluster_name),
+	                        optional: Some(false),
+	                    }),
+	                    ..Default::default()
+	                }),
+	                ..Default::default()
+	            },
+	            EnvVar {
+	                name: "NODE_NAME".to_string(),
+	                value_from: Some(EnvVarSource {
+	                    field_ref: Some(ObjectFieldSelector {
+	                        field_path: "metadata.name".to_string(),
+	                        ..Default::default()
+	                    }),
+	                    ..Default::default()
+	                }),
+	                ..Default::default()
+	            },
+	        ]),
         security_context: Some(SecurityContext {
             capabilities: Some(Capabilities {
                 add: Some(vec!["SYS_CHROOT".to_string()]),
@@ -629,33 +704,30 @@ fn generate_statefulset(
             }),
             ..Default::default()
         }),
-        volume_mounts: Some(vec![
-            VolumeMount {
-                name: "config".to_string(),
-                mount_path: "/var/ossec/etc/ossec.conf".to_string(),
-                sub_path: Some("ossec.conf".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "rules".to_string(),
-                mount_path: "/var/ossec/etc/rules/local_rules.xml".to_string(),
-                sub_path: Some("local_rules.xml".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "decoders".to_string(),
-                mount_path: "/var/ossec/etc/decoders/local_decoder.xml".to_string(),
-                sub_path: Some("local_decoder.xml".to_string()),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "tls".to_string(),
-                mount_path: "/var/ossec/etc/certs".to_string(),
-                ..Default::default()
-            },
-        ]),
-        ..Default::default()
-    }];
+	        volume_mounts: Some(vec![
+	            VolumeMount {
+	                name: "config".to_string(),
+	                mount_path: "/wazuh-config-mount/etc".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "rules".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "decoders".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
+	                ..Default::default()
+	            },
+	            VolumeMount {
+	                name: "tls".to_string(),
+	                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
+	                ..Default::default()
+	            },
+	        ]),
+	        ..Default::default()
+	    }];
 
     if nginx_enabled {
         let nginx_image = manager
@@ -691,16 +763,6 @@ fn generate_statefulset(
                 VolumeMount {
                     name: "tls".to_string(),
                     mount_path: "/etc/nginx/certs".to_string(),
-                    ..Default::default()
-                },
-                VolumeMount {
-                    name: "nginx-crl".to_string(),
-                    mount_path: "/etc/nginx/crl".to_string(),
-                    ..Default::default()
-                },
-                VolumeMount {
-                    name: "nginx-crl-config".to_string(),
-                    mount_path: "/etc/nginx/crl-config".to_string(),
                     ..Default::default()
                 },
             ]),
@@ -752,19 +814,6 @@ fn generate_statefulset(
             }),
             ..Default::default()
         });
-        volumes.push(Volume {
-            name: "nginx-crl-config".to_string(),
-            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                name: format!("{}-nginx-config", name),
-                ..Default::default()
-            }),
-            ..Default::default()
-        });
-        volumes.push(Volume {
-            name: "nginx-crl".to_string(),
-            empty_dir: Some(k8s_openapi::api::core::v1::EmptyDirVolumeSource::default()),
-            ..Default::default()
-        });
     }
 
     Ok(StatefulSet {
@@ -793,6 +842,10 @@ fn generate_statefulset(
                                 tls_secret_rv.to_string(),
                             );
                             ann.insert(
+                                "wazuh.adorsys.team/cluster-key-secret-rv".to_string(),
+                                key_secret_rv.to_string(),
+                            );
+                            ann.insert(
                                 "wazuh.adorsys.team/config-hash".to_string(),
                                 config_hash.to_string(),
                             );
@@ -805,32 +858,7 @@ fn generate_statefulset(
                             fs_group: Some(101),
                             ..Default::default()
                         }),
-                        init_containers: if nginx_enabled {
-                            Some(vec![Container {
-                                name: "nginx-crl-fetch".to_string(),
-                                image: Some("curlimages/curl:8.5.0".to_string()),
-                                command: Some(vec![
-                                    "/bin/sh".to_string(),
-                                    "-c".to_string(),
-                                    "CRL_URL=$(cat /etc/nginx/crl-config/crl_url 2>/dev/null); if [ -n \"$CRL_URL\" ]; then curl -fsSL \"$CRL_URL\" -o /etc/nginx/crl/crl.pem; fi".to_string(),
-                                ]),
-                                volume_mounts: Some(vec![
-                                    VolumeMount {
-                                        name: "nginx-crl".to_string(),
-                                        mount_path: "/etc/nginx/crl".to_string(),
-                                        ..Default::default()
-                                    },
-                                    VolumeMount {
-                                        name: "nginx-crl-config".to_string(),
-                                        mount_path: "/etc/nginx/crl-config".to_string(),
-                                        ..Default::default()
-                                    },
-                                ]),
-                                ..Default::default()
-                            }])
-                        } else {
-                            None
-                        },
+                        init_containers: None,
                         containers,
                         volumes: Some(volumes),
                         ..Default::default()

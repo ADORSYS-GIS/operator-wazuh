@@ -4,7 +4,9 @@ metadata:
   name: custom-syslog-listener
   namespace: wazuh-test
 spec:
-  clusterName: wazuh-manager
   port: 514
   protocol: udp
-  type: syslog
+  manager_cluster:
+    name: wazuh-manager
+  service:
+    mode: attach

@@ -20,6 +20,16 @@ spec:
         properties:
           spec:
             properties:
+              apiSecretRef:
+                description: Secret reference for manager API credentials
+                nullable: true
+                properties:
+                  name:
+                    description: Secret name in the same namespace
+                    type: string
+                required:
+                - name
+                type: object
               cluster_ref:
                 description: Reference to the WazuhManagerCluster
                 properties:
@@ -41,10 +51,6 @@ spec:
                 description: Nginx sidecar configuration
                 nullable: true
                 properties:
-                  crl_url:
-                    description: Optional CRL URL to fetch into nginx at startup
-                    nullable: true
-                    type: string
                   custom_config:
                     description: Custom nginx.conf content
                     nullable: true

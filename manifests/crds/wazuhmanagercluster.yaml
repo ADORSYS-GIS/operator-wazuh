@@ -51,6 +51,16 @@ spec:
                 required:
                 - enabled
                 type: object
+              apiSecretRef:
+                description: Secret reference for manager API credentials
+                nullable: true
+                properties:
+                  name:
+                    description: Secret name in the same namespace
+                    type: string
+                required:
+                - name
+                type: object
               ha:
                 description: High availability configuration
                 nullable: true

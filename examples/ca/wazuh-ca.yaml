@@ -1,7 +1,7 @@
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhCA
 metadata:
-  name: wazuh-ca
+  name: wazuh
   namespace: wazuh-test
 spec:
   provider: selfSigned

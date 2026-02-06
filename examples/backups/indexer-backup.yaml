@@ -5,7 +5,7 @@ metadata:
   namespace: wazuh-test
 spec:
   wazuhIndexerClusterRef: wazuh-indexer
-  schedule: "*/5 * * * *"
+  schedule: "*/10 * * * *"
   storage:
     pvc:
       claimName: indexer-backup-pvc

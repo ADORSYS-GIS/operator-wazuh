@@ -12,6 +12,15 @@ spec:
     enabled: true
     cert_secret: indexer-tls-certs
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wazuh-manager-api-auth
+  namespace: wazuh-test
+stringData:
+  username: wazuh-api
+  password: wazuh-api-password
+---
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhManagerCluster
 metadata:
@@ -20,6 +29,8 @@ metadata:
 spec:
   replicas: 0
   version: "4.14.0"
+  apiSecretRef:
+    name: wazuh-manager-api-auth
   indexer_cluster:
     name: wazuh-indexer-secured
   tls:

@@ -7,8 +7,8 @@ use crate::pod_template::apply_pod_template_patch;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec, Secret, Service, ServicePort,
-    ServiceSpec, Volume, VolumeMount,
+    ConfigMap, Container, EnvVar, EnvVarSource, PodSpec, PodTemplateSpec, Secret, SecretKeySelector,
+    Service, ServicePort, ServiceSpec, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
@@ -75,6 +75,7 @@ async fn reconcile_dashboard(
     info!("Reconciling WazuhDashboard: {}/{}", ns, name);
 
     let client = ctx.client.clone();
+    let manager_api_secret_name = resolve_dashboard_manager_api_secret_name(&dashboard)?;
 
     // 1. Resolve indexer reference
     let indexer = resolve_dashboard_indexer(&dashboard, client.clone()).await?;
@@ -108,8 +109,8 @@ async fn reconcile_dashboard(
         let wazuh_yml = format!(
             r#"hosts:
   - url: https://{}.{}.svc.cluster.local:55000
-    user: admin
-    password: admin
+    user: "${{API_USERNAME}}"
+    password: "${{API_PASSWORD}}"
 "#,
             manager.name_any(),
             manager.namespace().unwrap()
@@ -298,6 +299,7 @@ async fn reconcile_dashboard(
     let deploy = generate_dashboard_deployment(
         &dashboard,
         &indexer,
+        manager_api_secret_name.as_deref(),
         &tls_secret_rv,
         &workload_name,
     )?;
@@ -458,6 +460,7 @@ fn generate_dashboard_service(dashboard: &WazuhDashboard) -> Result<Service> {
 fn generate_dashboard_deployment(
     dashboard: &WazuhDashboard,
     indexer: &WazuhIndexerCluster,
+    manager_api_secret_name: Option<&str>,
     tls_secret_rv: &str,
     workload_name: &str,
 ) -> Result<Deployment> {
@@ -485,30 +488,59 @@ fn generate_dashboard_deployment(
         .map(|n| n.enabled)
         .unwrap_or(true);
 
+    let mut dashboard_env = vec![
+        EnvVar {
+            name: "INDEXER_URL".to_string(),
+            value: Some(format!(
+                "https://{}.{}.svc.cluster.local:9200",
+                indexer.name_any(),
+                indexer.namespace().unwrap()
+            )),
+            ..Default::default()
+        },
+        EnvVar {
+            name: "INDEXER_USER".to_string(),
+            value: Some("admin".to_string()),
+            ..Default::default()
+        },
+        EnvVar {
+            name: "INDEXER_PASSWORD".to_string(),
+            value: Some("admin".to_string()),
+            ..Default::default()
+        },
+    ];
+
+    if let Some(secret_name) = manager_api_secret_name {
+        dashboard_env.push(EnvVar {
+            name: "API_USERNAME".to_string(),
+            value_from: Some(EnvVarSource {
+                secret_key_ref: Some(SecretKeySelector {
+                    key: "username".to_string(),
+                    name: secret_name.to_string(),
+                    optional: Some(false),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        dashboard_env.push(EnvVar {
+            name: "API_PASSWORD".to_string(),
+            value_from: Some(EnvVarSource {
+                secret_key_ref: Some(SecretKeySelector {
+                    key: "password".to_string(),
+                    name: secret_name.to_string(),
+                    optional: Some(false),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
+
     let mut containers = vec![Container {
         name: "dashboard".to_string(),
         image: Some(format!("wazuh/wazuh-dashboard:{}", dashboard.spec.version)),
-        env: Some(vec![
-            EnvVar {
-                name: "INDEXER_URL".to_string(),
-                value: Some(format!(
-                    "https://{}.{}.svc.cluster.local:9200",
-                    indexer.name_any(),
-                    indexer.namespace().unwrap()
-                )),
-                ..Default::default()
-            },
-            EnvVar {
-                name: "INDEXER_USER".to_string(),
-                value: Some("admin".to_string()),
-                ..Default::default()
-            },
-            EnvVar {
-                name: "INDEXER_PASSWORD".to_string(),
-                value: Some("admin".to_string()),
-                ..Default::default()
-            },
-        ]),
+        env: Some(dashboard_env),
         volume_mounts: Some(vec![
             VolumeMount {
                 name: "config".to_string(),
@@ -649,6 +681,30 @@ fn generate_dashboard_deployment(
         }),
         ..Default::default()
     })
+}
+
+fn resolve_dashboard_manager_api_secret_name(dashboard: &WazuhDashboard) -> Result<Option<String>> {
+    let manager_ref = match dashboard.spec.manager_cluster.as_ref() {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    let auth = manager_ref.auth.as_ref().ok_or_else(|| {
+        Error::ValidationError(format!(
+            "Missing spec.manager_cluster.auth.secretRef.name for dashboard {}/{}",
+            dashboard.namespace().unwrap_or_default(),
+            dashboard.name_any()
+        ))
+    })?;
+    let secret_name = auth.secret_ref.name.trim();
+    if secret_name.is_empty() {
+        return Err(Error::ValidationError(format!(
+            "Empty spec.manager_cluster.auth.secretRef.name for dashboard {}/{}",
+            dashboard.namespace().unwrap_or_default(),
+            dashboard.name_any()
+        )));
+    }
+    Ok(Some(secret_name.to_string()))
 }
 
 async fn resolve_dashboard_manager(
