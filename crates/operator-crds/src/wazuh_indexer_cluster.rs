@@ -6,6 +6,7 @@ use crate::{VolumeClaimTemplate, WorkloadConfig};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -19,6 +20,9 @@ use serde::{Deserialize, Serialize};
 pub struct WazuhIndexerClusterSpec {
     /// Number of indexer nodes
     pub replicas: i32,
+    /// Resource requirements for indexer containers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ContainerResources>,
     /// Storage configuration
     pub storage: StorageConfig,
     /// Wazuh indexer version
@@ -67,6 +71,16 @@ pub struct TlsConfig {
     pub ca_ref: Option<WazuhCARef>,
     /// TLS certificate secret
     pub cert_secret: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct ContainerResources {
+    /// Resource limits (e.g., {"memory": "2Gi", "cpu": "1"})
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<BTreeMap<String, String>>,
+    /// Resource requests (e.g., {"memory": "1Gi", "cpu": "500m"})
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requests: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

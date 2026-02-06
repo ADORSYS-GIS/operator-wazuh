@@ -88,6 +88,21 @@ spec:
                 description: Number of indexer nodes
                 format: int32
                 type: integer
+              resources:
+                description: Resource requirements for indexer containers
+                nullable: true
+                properties:
+                  limits:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                  requests:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                type: object
               storage:
                 description: Storage configuration
                 properties:

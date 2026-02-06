@@ -9,7 +9,8 @@ use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
     PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSecurityContext, PodSpec, PodTemplateSpec,
-    SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
+    ResourceRequirements, SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount,
+    VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
@@ -333,6 +334,7 @@ async fn reconcile_indexer(
 
     // 1. Generate and Apply ConfigMap
     let cm = generate_configmap(&indexer, &workload_name)?;
+    let config_hash = calculate_hash(cm.data.as_ref().unwrap_or(&BTreeMap::new()));
     cm_api
         .patch(
             &format!("{}-config", name),
@@ -362,7 +364,7 @@ async fn reconcile_indexer(
         .await?;
 
     // 4. Generate and Apply StatefulSet
-    let sts = generate_statefulset(&indexer, &workload_name, &tls_secret_rv)?;
+    let sts = generate_statefulset(&indexer, &workload_name, &tls_secret_rv, &config_hash)?;
     sts_api
         .patch(
             &workload_name,
@@ -613,8 +615,10 @@ fn generate_statefulset(
     indexer: &WazuhIndexerCluster,
     workload_name: &str,
     tls_secret_rv: &str,
+    config_hash: &str,
 ) -> Result<StatefulSet> {
     let name = indexer.name_any();
+    let heap = heap_from_resources(indexer.spec.resources.as_ref());
     let tls_secret_name = indexer
         .spec
         .tls
@@ -662,6 +666,10 @@ fn generate_statefulset(
                                 "wazuh.adorsys.team/tls-secret-rv".to_string(),
                                 tls_secret_rv.to_string(),
                             );
+                            pod_annotations.insert(
+                                "wazuh.adorsys.team/config-hash".to_string(),
+                                config_hash.to_string(),
+                            );
                             pod_annotations
                         }),
                         ..Default::default()
@@ -690,8 +698,10 @@ fn generate_statefulset(
                                 EnvVar {
                                     name: "OPENSEARCH_JAVA_OPTS".to_string(),
                                     value: Some(
-                                        "-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true"
-                                            .to_string(),
+                                        format!(
+                                            "-Xms{} -Xmx{} -Dlog4j2.formatMsgNoLookups=true",
+                                            heap, heap
+                                        ),
                                     ),
                                     ..Default::default()
                                 },
@@ -753,6 +763,9 @@ fn generate_statefulset(
                                 }),
                                 ..Default::default()
                             }),
+                            resources: build_resource_requirements(
+                                indexer.spec.resources.as_ref(),
+                            ),
                             volume_mounts: Some(vec![
                                 VolumeMount {
                                     name: "indexer-data".to_string(),
@@ -889,4 +902,94 @@ fn secret_value(secret: &k8s_openapi::api::core::v1::Secret, key: &str) -> Optio
         }
     }
     None
+}
+
+fn build_resource_requirements(
+    resources: Option<&operator_crds::wazuh_indexer_cluster::ContainerResources>,
+) -> Option<ResourceRequirements> {
+    let limits = resources
+        .and_then(|r| r.limits.as_ref())
+        .map(|src| {
+            src.iter()
+                .map(|(k, v)| (k.clone(), Quantity(v.clone())))
+                .collect::<BTreeMap<_, _>>()
+        });
+    let requests = resources
+        .and_then(|r| r.requests.as_ref())
+        .map(|src| {
+            src.iter()
+                .map(|(k, v)| (k.clone(), Quantity(v.clone())))
+                .collect::<BTreeMap<_, _>>()
+        });
+
+    if limits.is_none() && requests.is_none() {
+        None
+    } else {
+        Some(ResourceRequirements {
+            limits,
+            requests,
+            ..Default::default()
+        })
+    }
+}
+
+fn heap_from_resources(
+    resources: Option<&operator_crds::wazuh_indexer_cluster::ContainerResources>,
+) -> String {
+    if let Some(limits) = resources.and_then(|r| r.limits.as_ref()) {
+        if let Some(memory) = limits.get("memory") {
+            if let Some(mib) = parse_quantity_to_mib(memory) {
+                return format!("{}m", mib);
+            }
+        }
+    }
+    "1g".to_string()
+}
+
+fn parse_quantity_to_mib(value: &str) -> Option<u64> {
+    let s = value.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut split_idx = s.len();
+    for (idx, ch) in s.char_indices() {
+        if !(ch.is_ascii_digit() || ch == '.') {
+            split_idx = idx;
+            break;
+        }
+    }
+    let (num_str, suffix) = s.split_at(split_idx);
+    let num: f64 = num_str.parse().ok()?;
+    let multiplier: f64 = match suffix {
+        "" => 1.0,
+        "K" => 1_000.0,
+        "M" => 1_000_000.0,
+        "G" => 1_000_000_000.0,
+        "T" => 1_000_000_000_000.0,
+        "P" => 1_000_000_000_000_000.0,
+        "E" => 1_000_000_000_000_000_000.0,
+        "Ki" => 1024.0,
+        "Mi" => 1024.0 * 1024.0,
+        "Gi" => 1024.0 * 1024.0 * 1024.0,
+        "Ti" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        "Pi" => 1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        "Ei" => 1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    let bytes = num * multiplier;
+    if bytes <= 0.0 {
+        return None;
+    }
+    let mib = (bytes / (1024.0 * 1024.0)).floor() as u64;
+    Some(mib.max(1))
+}
+
+fn calculate_hash(data: &BTreeMap<String, String>) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for (key, value) in data {
+        hasher.update(key);
+        hasher.update(value);
+    }
+    format!("{:x}", hasher.finalize())
 }
