@@ -228,7 +228,11 @@ async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
 
             let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), ns);
             sts_api
-                .patch(&manager_name, &PatchParams::default(), &Patch::Merge(&patch))
+                .patch(
+                    &manager_name,
+                    &PatchParams::default(),
+                    &Patch::Merge(&patch),
+                )
                 .await?;
         }
 
@@ -249,12 +253,9 @@ async fn trigger_aggregation(client: kube::Client, ns: &str) -> Result<()> {
             manager.metadata.labels.as_ref(),
         )
         .await?;
-        let rules = ConfigAggregator::aggregate_rules(
-            client.clone(),
-            ns,
-            manager.metadata.labels.as_ref(),
-        )
-        .await?;
+        let rules =
+            ConfigAggregator::aggregate_rules(client.clone(), ns, manager.metadata.labels.as_ref())
+                .await?;
         let decoders = ConfigAggregator::aggregate_decoders(
             client.clone(),
             ns,

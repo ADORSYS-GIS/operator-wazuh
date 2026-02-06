@@ -1,9 +1,9 @@
 //! WazuhManagerCluster CRD definition
 
+use crate::wazuh_ca::WazuhCARef;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::wazuh_ca::WazuhCARef;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -24,7 +24,11 @@ pub struct WazuhManagerClusterSpec {
     /// API configuration
     pub api: Option<ApiConfig>,
     /// Secret reference for manager API credentials
-    #[serde(rename = "apiSecretRef", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "apiSecretRef",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub api_secret_ref: Option<SecretNameRef>,
     /// Wazuh manager version
     pub version: String,

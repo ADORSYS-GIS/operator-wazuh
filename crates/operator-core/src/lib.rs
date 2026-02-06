@@ -18,13 +18,13 @@ pub mod indexer_controller;
 pub mod listener_controller;
 pub mod manager_backup_controller;
 pub mod manager_controller;
+pub mod pod_template;
 pub mod rule_controller;
 pub mod security_controller;
 pub mod tls;
+pub mod volume_claim;
 pub mod wazuh_ca_controller;
 pub mod wazuh_manager_controller;
-pub mod pod_template;
-pub mod volume_claim;
 
 pub use client::ClientManager;
 pub use controller::WazuhController;

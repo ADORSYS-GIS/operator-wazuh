@@ -11,7 +11,8 @@ WORKDIR /usr/src/app
 COPY . .
 
 # Build the operator-cli which contains the run command
-RUN cargo build --release -p operator-cli
+RUN --mount=type=cache,target=/root/.cargo \
+      cargo build --release -p operator-cli
 
 # Runtime stage
 FROM debian:bookworm-slim

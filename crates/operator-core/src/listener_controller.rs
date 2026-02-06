@@ -118,28 +118,21 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
             }
             if let Some(extra) = &manager.metadata.labels {
                 for (k, v) in extra {
-                    selector_labels.entry(k.clone()).or_insert_with(|| v.clone());
+                    selector_labels
+                        .entry(k.clone())
+                        .or_insert_with(|| v.clone());
                 }
             }
 
-            let ossec_conf = ConfigAggregator::aggregate_configs(
-                client.clone(),
-                &ns,
-                Some(&selector_labels),
-            )
-            .await?;
-            let rules = ConfigAggregator::aggregate_rules(
-                client.clone(),
-                &ns,
-                Some(&selector_labels),
-            )
-            .await?;
-            let decoders = ConfigAggregator::aggregate_decoders(
-                client.clone(),
-                &ns,
-                Some(&selector_labels),
-            )
-            .await?;
+            let ossec_conf =
+                ConfigAggregator::aggregate_configs(client.clone(), &ns, Some(&selector_labels))
+                    .await?;
+            let rules =
+                ConfigAggregator::aggregate_rules(client.clone(), &ns, Some(&selector_labels))
+                    .await?;
+            let decoders =
+                ConfigAggregator::aggregate_decoders(client.clone(), &ns, Some(&selector_labels))
+                    .await?;
 
             let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
             let mut config_data = BTreeMap::new();
@@ -215,7 +208,11 @@ pub async fn reconcile(listener: Arc<WazuhListener>, ctx: Arc<ListenerContext>) 
 
             let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), &ns);
             sts_api
-                .patch(&workload_name, &PatchParams::default(), &Patch::Merge(&patch))
+                .patch(
+                    &workload_name,
+                    &PatchParams::default(),
+                    &Patch::Merge(&patch),
+                )
                 .await?;
         }
 
@@ -332,7 +329,12 @@ fn generate_listener_service(
             labels.insert(k.clone(), v.clone());
         }
     }
-    if let Some(extra) = listener.spec.service.as_ref().and_then(|s| s.labels.as_ref()) {
+    if let Some(extra) = listener
+        .spec
+        .service
+        .as_ref()
+        .and_then(|s| s.labels.as_ref())
+    {
         for (k, v) in extra {
             labels.insert(k.clone(), v.clone());
         }

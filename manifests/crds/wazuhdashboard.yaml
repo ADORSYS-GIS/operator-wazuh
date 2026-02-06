@@ -35,12 +35,140 @@ spec:
                   enabled:
                     description: Enable authentication
                     type: boolean
+                  openid:
+                    description: OpenID authentication settings
+                    nullable: true
+                    properties:
+                      baseRedirectUrl:
+                        description: Base redirect URL
+                        nullable: true
+                        type: string
+                      clientSecretRef:
+                        description: OpenID client secret from Kubernetes secret
+                        nullable: true
+                        properties:
+                          key:
+                            description: Secret key
+                            type: string
+                          name:
+                            description: Secret name in the same namespace
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      client_id:
+                        description: OpenID client id
+                        type: string
+                      client_secret:
+                        description: OpenID client secret (plain text)
+                        nullable: true
+                        type: string
+                      connect_url:
+                        description: OpenID discovery endpoint
+                        type: string
+                      scope:
+                        description: OpenID scope
+                        nullable: true
+                        type: string
+                    required:
+                    - client_id
+                    - connect_url
+                    type: object
                 required:
                 - enabled
+                type: object
+              config:
+                description: Dashboard runtime configuration
+                nullable: true
+                properties:
+                  branding:
+                    description: Branding settings
+                    nullable: true
+                    properties:
+                      applicationTitle:
+                        description: Custom title
+                        nullable: true
+                        type: string
+                      faviconUrl:
+                        description: Favicon URL
+                        nullable: true
+                        type: string
+                      loadingLogoUrl:
+                        description: Loading logo URL
+                        nullable: true
+                        type: string
+                      logoUrl:
+                        description: Main logo URL
+                        nullable: true
+                        type: string
+                      markUrl:
+                        description: Mark logo URL
+                        nullable: true
+                        type: string
+                      useExpandedHeader:
+                        description: Expanded header usage
+                        nullable: true
+                        type: boolean
+                    type: object
+                  opensearchHosts:
+                    description: Override OPENSEARCH_HOSTS env value (single URL)
+                    nullable: true
+                    type: string
+                  overrides:
+                    additionalProperties: true
+                    description: Raw overrides for opensearch_dashboards.yml (highest precedence)
+                    nullable: true
+                    type: object
+                  session:
+                    description: Session settings
+                    nullable: true
+                    properties:
+                      cookieTtlMs:
+                        description: Cookie TTL in milliseconds
+                        format: int64
+                        nullable: true
+                        type: integer
+                      keepalive:
+                        description: Keep session alive
+                        nullable: true
+                        type: boolean
+                      sessionTtlMs:
+                        description: Session TTL in milliseconds
+                        format: int64
+                        nullable: true
+                        type: integer
+                    type: object
+                  unauthenticatedRoutes:
+                    description: Routes that can be accessed without authentication
+                    items:
+                      type: string
+                    nullable: true
+                    type: array
+                  wazuhApiUrl:
+                    description: Override WAZUH_API_URL env value (single URL)
+                    nullable: true
+                    type: string
                 type: object
               indexer_cluster:
                 description: Reference to indexer cluster
                 properties:
+                  auth:
+                    description: Dashboard auth reference
+                    nullable: true
+                    properties:
+                      secretRef:
+                        description: Secret reference for dashboard login credentials in indexer
+                        properties:
+                          name:
+                            description: Secret name in the same namespace
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - secretRef
+                    type: object
                   name:
                     description: Name of the indexer cluster
                     type: string

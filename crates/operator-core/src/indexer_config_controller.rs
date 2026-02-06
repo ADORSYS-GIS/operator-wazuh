@@ -7,8 +7,8 @@ use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
-use operator_crds::wazuh_indexer_config::WazuhIndexerConfigStatus;
 use operator_crds::wazuh_indexer_config::InternalUser;
+use operator_crds::wazuh_indexer_config::WazuhIndexerConfigStatus;
 use operator_crds::{WazuhIndexerCluster, WazuhIndexerConfig};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -64,10 +64,7 @@ async fn reconcile_config(
 
     // 1. Get the referenced WazuhIndexerCluster
     let cluster_ref = &config.spec.wazuh_indexer_cluster_ref;
-    let cluster_ns = cluster_ref
-        .namespace
-        .clone()
-        .unwrap_or_else(|| ns.clone());
+    let cluster_ns = cluster_ref.namespace.clone().unwrap_or_else(|| ns.clone());
     let cluster_api: Api<WazuhIndexerCluster> = Api::namespaced(client.clone(), &cluster_ns);
     let cluster_name = &cluster_ref.name;
     let cluster = cluster_api.get(cluster_name).await.map_err(|e| {
@@ -79,12 +76,8 @@ async fn reconcile_config(
 
     // 2. Generate ConfigMap
     let cm_name = format!("{}-security-config", name);
-    let resolved_internal_users = resolve_internal_users(
-        client.clone(),
-        &ns,
-        config.spec.internal_users.as_ref(),
-    )
-    .await?;
+    let resolved_internal_users =
+        resolve_internal_users(client.clone(), &ns, config.spec.internal_users.as_ref()).await?;
     let cm = generate_configmap(&config, &cm_name, resolved_internal_users)?;
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     cm_api
@@ -97,7 +90,6 @@ async fn reconcile_config(
 
     // 3. Calculate Hash
     let hash = calculate_hash(&cm.data.unwrap_or_default());
-
 
     // 5. Ensure CronJob
     ensure_cronjob(&config, &cluster, &cm_name, &hash, client.clone()).await?;
@@ -183,7 +175,10 @@ fn generate_configmap(
             })?,
         );
     }
-    if let Some(internal_users) = internal_users.as_ref().or(config.spec.internal_users.as_ref()) {
+    if let Some(internal_users) = internal_users
+        .as_ref()
+        .or(config.spec.internal_users.as_ref())
+    {
         let value = with_security_meta(
             serde_yaml::to_value(internal_users).map_err(|e| {
                 Error::ValidationError(format!("Failed to encode internal_users: {}", e))
@@ -379,11 +374,11 @@ fn generate_cronjob(
         .as_ref()
         .and_then(|t| t.cert_secret.clone())
         .unwrap_or_else(|| format!("{}-tls", cluster_name));
-    
+
     let mut labels = BTreeMap::new();
     labels.insert("app".to_string(), "wazuh-indexer-config-job".to_string());
     labels.insert("config-hash".to_string(), hash[0..8].to_string());
-    
+
     let owner_ref = config.controller_owner_ref(&()).map(|o| vec![o]);
 
     let job_spec = JobSpec {

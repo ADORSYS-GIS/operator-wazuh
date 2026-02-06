@@ -2,6 +2,8 @@
 
 use crate::config_aggregator::{ConfigAggregator, ListenerPort};
 use crate::error::{Error, Result};
+use crate::pod_template::apply_pod_template_patch;
+use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
@@ -9,15 +11,11 @@ use k8s_openapi::api::core::v1::{
     VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::{ResourceExt};
-use crate::pod_template::apply_pod_template_patch;
-use crate::volume_claim::{merge_volume_claims, pvc_from_template};
-use operator_crds::{
-    WazuhIndexerCluster, WazuhManager, WazuhManagerCluster, WazuhManagerRole,
-};
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
+use operator_crds::{WazuhIndexerCluster, WazuhManager, WazuhManagerCluster, WazuhManagerRole};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -34,7 +32,10 @@ impl WazuhManagerContext {
 }
 
 /// Reconcile function for WazuhManager
-pub async fn reconcile(manager: Arc<WazuhManager>, ctx: Arc<WazuhManagerContext>) -> Result<Action> {
+pub async fn reconcile(
+    manager: Arc<WazuhManager>,
+    ctx: Arc<WazuhManagerContext>,
+) -> Result<Action> {
     let ns = manager
         .namespace()
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
@@ -165,7 +166,8 @@ async fn reconcile_manager(
 
     // 6. Create StatefulSet
     let tls_secret_name = format!("{}-tls", cluster_name);
-    let secret_api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), &cluster_ns);
+    let secret_api: Api<k8s_openapi::api::core::v1::Secret> =
+        Api::namespaced(client.clone(), &cluster_ns);
     let tls_secret_rv = secret_api
         .get(&tls_secret_name)
         .await
@@ -283,10 +285,7 @@ async fn collect_master_nodes(
         for i in 0..manager.spec.replicas {
             nodes.push(format!(
                 "{}-{}.{}-headless.{}.svc.cluster.local",
-                workload_name,
-                i,
-                cluster_name,
-                cluster_ns
+                workload_name, i, cluster_name, cluster_ns
             ));
         }
     }
@@ -616,15 +615,15 @@ fn generate_statefulset(
         });
     }
 
-	    let mut containers = vec![Container {
-	        name: "manager".to_string(),
-	        image: Some(format!("wazuh/wazuh-manager:{}", cluster.spec.version)),
+    let mut containers = vec![Container {
+        name: "manager".to_string(),
+        image: Some(format!("wazuh/wazuh-manager:{}", cluster.spec.version)),
         ports: if manager_ports.is_empty() {
             None
         } else {
             Some(manager_ports)
         },
-	        env: Some(vec![
+        env: Some(vec![
             EnvVar {
                 name: "INDEXER_URL".to_string(),
                 value: Some(format!(
@@ -661,42 +660,42 @@ fn generate_statefulset(
                 }),
                 ..Default::default()
             },
-	            EnvVar {
-	                name: "API_PASSWORD".to_string(),
-	                value_from: Some(EnvVarSource {
-	                    secret_key_ref: Some(SecretKeySelector {
-	                        key: "password".to_string(),
-	                        name: api_secret_name.to_string(),
-	                        optional: Some(false),
-	                    }),
-	                    ..Default::default()
-	                }),
-	                ..Default::default()
-	            },
-	            EnvVar {
-	                name: "WAZUH_CLUSTER_KEY".to_string(),
-	                value_from: Some(EnvVarSource {
-	                    secret_key_ref: Some(SecretKeySelector {
-	                        key: "cluster-key".to_string(),
-	                        name: format!("{}-key", cluster_name),
-	                        optional: Some(false),
-	                    }),
-	                    ..Default::default()
-	                }),
-	                ..Default::default()
-	            },
-	            EnvVar {
-	                name: "NODE_NAME".to_string(),
-	                value_from: Some(EnvVarSource {
-	                    field_ref: Some(ObjectFieldSelector {
-	                        field_path: "metadata.name".to_string(),
-	                        ..Default::default()
-	                    }),
-	                    ..Default::default()
-	                }),
-	                ..Default::default()
-	            },
-	        ]),
+            EnvVar {
+                name: "API_PASSWORD".to_string(),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "password".to_string(),
+                        name: api_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "WAZUH_CLUSTER_KEY".to_string(),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "cluster-key".to_string(),
+                        name: format!("{}-key", cluster_name),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "NODE_NAME".to_string(),
+                value_from: Some(EnvVarSource {
+                    field_ref: Some(ObjectFieldSelector {
+                        field_path: "metadata.name".to_string(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
         security_context: Some(SecurityContext {
             capabilities: Some(Capabilities {
                 add: Some(vec!["SYS_CHROOT".to_string()]),
@@ -704,30 +703,30 @@ fn generate_statefulset(
             }),
             ..Default::default()
         }),
-	        volume_mounts: Some(vec![
-	            VolumeMount {
-	                name: "config".to_string(),
-	                mount_path: "/wazuh-config-mount/etc".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "rules".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "decoders".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "tls".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
-	                ..Default::default()
-	            },
-	        ]),
-	        ..Default::default()
-	    }];
+        volume_mounts: Some(vec![
+            VolumeMount {
+                name: "config".to_string(),
+                mount_path: "/wazuh-config-mount/etc".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "rules".to_string(),
+                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "decoders".to_string(),
+                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "tls".to_string(),
+                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }];
 
     if nginx_enabled {
         let nginx_image = manager
@@ -878,7 +877,11 @@ fn generate_statefulset(
                     }
                 }
                 let merged = merge_volume_claims(defaults, overrides);
-                if merged.is_empty() { None } else { Some(merged) }
+                if merged.is_empty() {
+                    None
+                } else {
+                    Some(merged)
+                }
             },
             update_strategy: Some(StatefulSetUpdateStrategy {
                 type_: Some("RollingUpdate".to_string()),
@@ -891,7 +894,11 @@ fn generate_statefulset(
 }
 
 /// Error policy for WazuhManager reconciliation
-pub fn error_policy(_manager: Arc<WazuhManager>, error: &Error, _ctx: Arc<WazuhManagerContext>) -> Action {
+pub fn error_policy(
+    _manager: Arc<WazuhManager>,
+    error: &Error,
+    _ctx: Arc<WazuhManagerContext>,
+) -> Action {
     error!("Reconciliation failed: {:?}", error);
     Action::requeue(Duration::from_secs(60))
 }

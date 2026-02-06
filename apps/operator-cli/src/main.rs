@@ -10,9 +10,9 @@ use anyhow::Result;
 use clap::Parser;
 use futures::join;
 use operator_core::WazuhController;
+use std::env;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use std::env;
 
 #[derive(Parser)]
 #[command(name = "wazuh-operator")]
@@ -64,9 +64,7 @@ async fn main() -> Result<()> {
                     .with_env_filter(env_filter)
                     .json()
                     .init(),
-                _ => tracing_subscriber::fmt()
-                    .with_env_filter(env_filter)
-                    .init(),
+                _ => tracing_subscriber::fmt().with_env_filter(env_filter).init(),
             }
             info!("Starting Wazuh operator in namespace: {}", namespace);
 

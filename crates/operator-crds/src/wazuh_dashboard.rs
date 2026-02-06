@@ -1,11 +1,13 @@
 //! WazuhDashboard CRD definition
 
+use crate::WorkloadConfig;
+use crate::pod_template::PodTemplateSpecPatch;
+use crate::wazuh_ca::WazuhCARef;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::wazuh_ca::WazuhCARef;
-use crate::pod_template::PodTemplateSpecPatch;
-use crate::WorkloadConfig;
+use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -34,11 +36,18 @@ pub struct WazuhDashboardSpec {
     /// Wazuh dashboard version
     pub version: String,
     /// Pod template overrides
-    #[serde(rename = "podTemplate", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "podTemplate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pod_template: Option<PodTemplateSpecPatch>,
     /// Workload configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<WorkloadConfig>,
+    /// Dashboard runtime configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<DashboardConfig>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -78,6 +87,9 @@ pub struct IndexerRef {
     pub name: String,
     /// Namespace of the indexer cluster
     pub namespace: Option<String>,
+    /// Dashboard auth reference
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<IndexerAuthRef>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -94,6 +106,13 @@ pub struct ManagerRef {
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
 pub struct ManagerAuthRef {
     /// Secret reference for manager API credentials
+    #[serde(rename = "secretRef")]
+    pub secret_ref: SecretNameRef,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct IndexerAuthRef {
+    /// Secret reference for dashboard login credentials in indexer
     #[serde(rename = "secretRef")]
     pub secret_ref: SecretNameRef,
 }
@@ -122,6 +141,138 @@ pub struct AuthConfig {
     pub auth_type: Option<String>,
     /// Authentication secret
     pub auth_secret: Option<String>,
+    /// OpenID authentication settings
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openid: Option<OpenIdConfig>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct DashboardConfig {
+    /// Override OPENSEARCH_HOSTS env value (single URL)
+    #[serde(
+        rename = "opensearchHosts",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub opensearch_hosts: Option<String>,
+    /// Override WAZUH_API_URL env value (single URL)
+    #[serde(
+        rename = "wazuhApiUrl",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wazuh_api_url: Option<String>,
+    /// Routes that can be accessed without authentication
+    #[serde(
+        rename = "unauthenticatedRoutes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unauthenticated_routes: Option<Vec<String>>,
+    /// Session settings
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<DashboardSessionConfig>,
+    /// Branding settings
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branding: Option<DashboardBrandingConfig>,
+    /// Raw overrides for opensearch_dashboards.yml (highest precedence)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<BTreeMap<String, JsonValue>>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct DashboardSessionConfig {
+    /// Cookie TTL in milliseconds
+    #[serde(
+        rename = "cookieTtlMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cookie_ttl_ms: Option<i64>,
+    /// Session TTL in milliseconds
+    #[serde(
+        rename = "sessionTtlMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub session_ttl_ms: Option<i64>,
+    /// Keep session alive
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct DashboardBrandingConfig {
+    /// Custom title
+    #[serde(
+        rename = "applicationTitle",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub application_title: Option<String>,
+    /// Favicon URL
+    #[serde(
+        rename = "faviconUrl",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub favicon_url: Option<String>,
+    /// Loading logo URL
+    #[serde(
+        rename = "loadingLogoUrl",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub loading_logo_url: Option<String>,
+    /// Main logo URL
+    #[serde(rename = "logoUrl", default, skip_serializing_if = "Option::is_none")]
+    pub logo_url: Option<String>,
+    /// Mark logo URL
+    #[serde(rename = "markUrl", default, skip_serializing_if = "Option::is_none")]
+    pub mark_url: Option<String>,
+    /// Expanded header usage
+    #[serde(
+        rename = "useExpandedHeader",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub use_expanded_header: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct OpenIdConfig {
+    /// OpenID discovery endpoint
+    pub connect_url: String,
+    /// OpenID client id
+    pub client_id: String,
+    /// OpenID client secret (plain text)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// OpenID client secret from Kubernetes secret
+    #[serde(
+        rename = "clientSecretRef",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_secret_ref: Option<SecretKeyRef>,
+    /// OpenID scope
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Base redirect URL
+    #[serde(
+        rename = "baseRedirectUrl",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub base_redirect_url: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct SecretKeyRef {
+    /// Secret name in the same namespace
+    pub name: String,
+    /// Secret key
+    pub key: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

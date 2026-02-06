@@ -1,10 +1,10 @@
 //! WazuhManager CRD definition
 
+use crate::pod_template::PodTemplateSpecPatch;
+use crate::{VolumeClaimTemplate, WorkloadConfig};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::pod_template::PodTemplateSpecPatch;
-use crate::{WorkloadConfig, VolumeClaimTemplate};
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
@@ -25,19 +25,35 @@ pub struct WazuhManagerSpec {
     /// Nginx sidecar configuration
     pub nginx: Option<NginxConfig>,
     /// Pod template overrides
-    #[serde(rename = "podTemplate", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "podTemplate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pod_template: Option<PodTemplateSpecPatch>,
     /// Workload configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<WorkloadConfig>,
     /// Additional volume claim templates
-    #[serde(rename = "volumeClaimTemplates", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "volumeClaimTemplates",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub volume_claim_templates: Option<Vec<VolumeClaimTemplate>>,
     /// Disable default PVC templates
-    #[serde(rename = "disableDefaultPvc", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "disableDefaultPvc",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub disable_default_pvc: Option<bool>,
     /// Secret reference for manager API credentials
-    #[serde(rename = "apiSecretRef", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "apiSecretRef",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub api_secret_ref: Option<SecretNameRef>,
 }
 

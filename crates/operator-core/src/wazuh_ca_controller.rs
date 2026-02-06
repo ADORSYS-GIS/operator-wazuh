@@ -3,10 +3,10 @@
 use crate::error::{Error, Result};
 use crate::tls::{CertificateSubject, TlsManager};
 use k8s_openapi::api::core::v1::Secret;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::{ResourceExt};
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::{WazuhCA, WazuhCAProvider, WazuhCASubject};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -30,20 +30,15 @@ pub async fn reconcile(ca: Arc<WazuhCA>, ctx: Arc<WazuhCaContext>) -> Result<Act
         .ok_or_else(|| Error::ValidationError("Namespace is required".to_string()))?;
     let ca_api: Api<WazuhCA> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(
-        &ca_api,
-        "wazuh.adorsys.team/finalizer",
-        ca,
-        |event| {
-            let ctx = ctx.clone();
-            async move {
-                match event {
-                    FinalizerEvent::Apply(ca) => reconcile_ca(ca, ctx).await,
-                    FinalizerEvent::Cleanup(ca) => cleanup_ca(ca, ctx).await,
-                }
+    finalizer(&ca_api, "wazuh.adorsys.team/finalizer", ca, |event| {
+        let ctx = ctx.clone();
+        async move {
+            match event {
+                FinalizerEvent::Apply(ca) => reconcile_ca(ca, ctx).await,
+                FinalizerEvent::Cleanup(ca) => cleanup_ca(ca, ctx).await,
             }
-        },
-    )
+        }
+    })
     .await
     .map_err(|e| Error::ReconciliationError(e.to_string()))
 }
@@ -101,7 +96,10 @@ async fn reconcile_ca(ca: Arc<WazuhCA>, ctx: Arc<WazuhCaContext>) -> Result<Acti
                 &ca,
                 client,
                 true,
-                Some(format!("Self-signed CA available in secret {}", secret_name)),
+                Some(format!(
+                    "Self-signed CA available in secret {}",
+                    secret_name
+                )),
             )
             .await?;
         }

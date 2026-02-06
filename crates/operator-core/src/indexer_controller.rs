@@ -1,16 +1,15 @@
 //! WazuhIndexerCluster controller implementation
 
-use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
 use crate::cert_manager::Certificate;
-use crate::tls::TlsManager;
 use crate::pod_template::apply_pod_template_patch;
+use crate::tls::TlsManager;
 use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSecurityContext, PodSpec,
-    PodTemplateSpec, SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount,
-    VolumeResourceRequirements,
+    PersistentVolumeClaim, PersistentVolumeClaimSpec, PodSecurityContext, PodSpec, PodTemplateSpec,
+    SecurityContext, Service, ServicePort, ServiceSpec, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
@@ -104,10 +103,7 @@ async fn reconcile_indexer(
     for i in 0..indexer.spec.replicas {
         alt_names.push(format!("{}-{}", workload_name, i));
         alt_names.push(format!("{}-{}.{}-headless", workload_name, i, name));
-        alt_names.push(format!(
-            "{}-{}.{}-headless.{}",
-            workload_name, i, name, ns
-        ));
+        alt_names.push(format!("{}-{}.{}-headless.{}", workload_name, i, name, ns));
         alt_names.push(format!(
             "{}-{}.{}-headless.{}.svc.cluster.local",
             workload_name, i, name, ns
@@ -126,7 +122,9 @@ async fn reconcile_indexer(
 
     if let Some(resolved_ca) = resolved_ca {
         match resolved_ca {
-            ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
+            ResolvedCa::SelfSigned {
+                ca_cert, ca_key, ..
+            } => {
                 let server_ready = secret_api
                     .get(&tls_secret_name)
                     .await
@@ -694,116 +692,126 @@ fn generate_statefulset(
                             image: Some(format!("wazuh/wazuh-indexer:{}", indexer.spec.version)),
                             ports: Some(vec![
                                 ContainerPort {
-                                name: Some("http".to_string()),
-                                container_port: 9200,
-                                ..Default::default()
-                            },
-                            ContainerPort {
-                                name: Some("transport".to_string()),
-                                container_port: 9300,
-                                ..Default::default()
-                            },
-                        ]),
-                        env: Some(vec![
-                            EnvVar {
-                                name: "OPENSEARCH_JAVA_OPTS".to_string(),
-                                value: Some("-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true".to_string()),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "NETWORK_HOST".to_string(),
-                                value: Some("0.0.0.0".to_string()),
-                                ..Default::default()
-                            },
-                            // EnvVar {
-                            //     name: "node.name".to_string(),
-                            //     value_from: Some(EnvVarSource {
-                            //         field_ref: Some(ObjectFieldSelector {
-                            //             field_path: "metadata.name".to_string(),
-                            //             ..Default::default()
-                            //         }),
-                            //         ..Default::default()
-                            //     }),
-                            //     ..Default::default()
-                            // },
-                            EnvVar {
-                                name: "NODE_NAME".to_string(),
-                                value_from: Some(EnvVarSource {
-                                    field_ref: Some(ObjectFieldSelector {
-                                        field_path: "metadata.name".to_string(),
+                                    name: Some("http".to_string()),
+                                    container_port: 9200,
+                                    ..Default::default()
+                                },
+                                ContainerPort {
+                                    name: Some("transport".to_string()),
+                                    container_port: 9300,
+                                    ..Default::default()
+                                },
+                            ]),
+                            env: Some(vec![
+                                EnvVar {
+                                    name: "OPENSEARCH_JAVA_OPTS".to_string(),
+                                    value: Some(
+                                        "-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true"
+                                            .to_string(),
+                                    ),
+                                    ..Default::default()
+                                },
+                                EnvVar {
+                                    name: "NETWORK_HOST".to_string(),
+                                    value: Some("0.0.0.0".to_string()),
+                                    ..Default::default()
+                                },
+                                // EnvVar {
+                                //     name: "node.name".to_string(),
+                                //     value_from: Some(EnvVarSource {
+                                //         field_ref: Some(ObjectFieldSelector {
+                                //             field_path: "metadata.name".to_string(),
+                                //             ..Default::default()
+                                //         }),
+                                //         ..Default::default()
+                                //     }),
+                                //     ..Default::default()
+                                // },
+                                EnvVar {
+                                    name: "NODE_NAME".to_string(),
+                                    value_from: Some(EnvVarSource {
+                                        field_ref: Some(ObjectFieldSelector {
+                                            field_path: "metadata.name".to_string(),
+                                            ..Default::default()
+                                        }),
                                         ..Default::default()
                                     }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "DISCOVERY_SERVICE".to_string(),
-                                value: Some(format!("{}-0.{}-headless.{}.svc.cluster.local", name, name, indexer.namespace().unwrap())),
-                                ..Default::default()
-                            },
-                            EnvVar {
-                                name: "KUBERNETES_NAMESPACE".to_string(),
-                                value_from: Some(EnvVarSource {
-                                    field_ref: Some(ObjectFieldSelector {
-                                        field_path: "metadata.namespace".to_string(),
+                                },
+                                EnvVar {
+                                    name: "DISCOVERY_SERVICE".to_string(),
+                                    value: Some(format!(
+                                        "{}-0.{}-headless.{}.svc.cluster.local",
+                                        name,
+                                        name,
+                                        indexer.namespace().unwrap()
+                                    )),
+                                    ..Default::default()
+                                },
+                                EnvVar {
+                                    name: "KUBERNETES_NAMESPACE".to_string(),
+                                    value_from: Some(EnvVarSource {
+                                        field_ref: Some(ObjectFieldSelector {
+                                            field_path: "metadata.namespace".to_string(),
+                                            ..Default::default()
+                                        }),
                                         ..Default::default()
                                     }),
                                     ..Default::default()
+                                },
+                            ]),
+                            security_context: Some(SecurityContext {
+                                run_as_user: Some(1000),
+                                run_as_group: Some(1000),
+                                capabilities: Some(Capabilities {
+                                    add: Some(vec!["SYS_CHROOT".to_string()]),
+                                    ..Default::default()
                                 }),
-                                ..Default::default()
-                            },
-                        ]),
-                        security_context: Some(SecurityContext {
-                            run_as_user: Some(1000),
-                            run_as_group: Some(1000),
-                            capabilities: Some(Capabilities {
-                                add: Some(vec!["SYS_CHROOT".to_string()]),
                                 ..Default::default()
                             }),
+                            volume_mounts: Some(vec![
+                                VolumeMount {
+                                    name: "indexer-data".to_string(),
+                                    mount_path: "/var/lib/wazuh-indexer".to_string(),
+                                    ..Default::default()
+                                },
+                                VolumeMount {
+                                    name: "config".to_string(),
+                                    mount_path: "/usr/share/wazuh-indexer/config/opensearch.yml"
+                                        .to_string(),
+                                    sub_path: Some("opensearch.yml".to_string()),
+                                    ..Default::default()
+                                },
+                                VolumeMount {
+                                    name: "tls".to_string(),
+                                    mount_path: "/usr/share/wazuh-indexer/config/certs".to_string(),
+                                    ..Default::default()
+                                },
+                            ]),
                             ..Default::default()
-                        }),
-                        volume_mounts: Some(vec![
-                            VolumeMount {
-                                name: "indexer-data".to_string(),
-                                mount_path: "/var/lib/wazuh-indexer".to_string(),
-                                ..Default::default()
-                            },
-                            VolumeMount {
+                        }],
+                        volumes: Some(vec![
+                            k8s_openapi::api::core::v1::Volume {
                                 name: "config".to_string(),
-                                mount_path: "/usr/share/wazuh-indexer/config/opensearch.yml"
-                                    .to_string(),
-                                sub_path: Some("opensearch.yml".to_string()),
+                                config_map: Some(
+                                    k8s_openapi::api::core::v1::ConfigMapVolumeSource {
+                                        name: format!("{}-config", name),
+                                        ..Default::default()
+                                    },
+                                ),
                                 ..Default::default()
                             },
-                            VolumeMount {
+                            k8s_openapi::api::core::v1::Volume {
                                 name: "tls".to_string(),
-                                mount_path: "/usr/share/wazuh-indexer/config/certs".to_string(),
+                                secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
+                                    secret_name: Some(tls_secret_name),
+                                    ..Default::default()
+                                }),
                                 ..Default::default()
                             },
                         ]),
                         ..Default::default()
-                    }],
-                    volumes: Some(vec![
-                        k8s_openapi::api::core::v1::Volume {
-                            name: "config".to_string(),
-                            config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                                name: format!("{}-config", name),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                        k8s_openapi::api::core::v1::Volume {
-                            name: "tls".to_string(),
-                            secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
-                                secret_name: Some(tls_secret_name),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        },
-                    ]),
-                    ..Default::default()
-                }),
+                    }),
                 };
                 if let Some(patch) = &indexer.spec.pod_template {
                     let _ = apply_pod_template_patch(&mut tpl, patch);
@@ -844,7 +852,11 @@ fn generate_statefulset(
                     }
                 }
                 let merged = merge_volume_claims(defaults, overrides);
-                if merged.is_empty() { None } else { Some(merged) }
+                if merged.is_empty() {
+                    None
+                } else {
+                    Some(merged)
+                }
             },
             update_strategy: Some(StatefulSetUpdateStrategy {
                 type_: Some("RollingUpdate".to_string()),
@@ -868,10 +880,7 @@ pub fn error_policy(
     Action::requeue(Duration::from_secs(60))
 }
 
-fn secret_has_keys(
-    secret: &k8s_openapi::api::core::v1::Secret,
-    keys: &[&str],
-) -> bool {
+fn secret_has_keys(secret: &k8s_openapi::api::core::v1::Secret, keys: &[&str]) -> bool {
     keys.iter().all(|key| {
         secret
             .data

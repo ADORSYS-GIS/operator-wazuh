@@ -130,7 +130,11 @@ pub async fn reconcile(config: Arc<WazuhConfig>, ctx: Arc<ConfigContext>) -> Res
                 }
             });
             sts_api
-                .patch(&workload_name, &PatchParams::default(), &Patch::Merge(&patch))
+                .patch(
+                    &workload_name,
+                    &PatchParams::default(),
+                    &Patch::Merge(&patch),
+                )
                 .await?;
         }
 

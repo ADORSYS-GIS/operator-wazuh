@@ -14,7 +14,11 @@ pub struct SecretKeyRef {
 pub struct InternalUser {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
-    #[serde(rename = "hashSecretRef", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "hashSecretRef",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hash_secret_ref: Option<SecretKeyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reserved: Option<bool>,

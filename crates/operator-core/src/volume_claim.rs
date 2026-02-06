@@ -38,14 +38,16 @@ pub fn merge_volume_claims(
     let mut merged = defaults;
 
     for override_pvc in overrides {
-        let name = override_pvc
-            .metadata
-            .name
-            .clone()
-            .unwrap_or_default();
-        if let Some(existing) = merged.iter_mut().find(|p| p.metadata.name == Some(name.clone())) {
+        let name = override_pvc.metadata.name.clone().unwrap_or_default();
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|p| p.metadata.name == Some(name.clone()))
+        {
             if let Some(labels) = override_pvc.metadata.labels {
-                let dst = existing.metadata.labels.get_or_insert_with(Default::default);
+                let dst = existing
+                    .metadata
+                    .labels
+                    .get_or_insert_with(Default::default);
                 for (k, v) in labels {
                     dst.insert(k, v);
                 }

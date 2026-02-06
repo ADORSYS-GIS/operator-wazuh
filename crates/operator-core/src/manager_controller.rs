@@ -1,8 +1,8 @@
 //! WazuhManagerCluster controller implementation
 
-use crate::error::{Error, Result};
-use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
 use crate::cert_manager::Certificate;
+use crate::error::{Error, Result};
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{
@@ -133,7 +133,9 @@ async fn reconcile_manager(
 
     if let Some(resolved_ca) = resolved_ca {
         match resolved_ca {
-            ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
+            ResolvedCa::SelfSigned {
+                ca_cert, ca_key, ..
+            } => {
                 let server_ready = secret_api
                     .get(&tls_secret_name)
                     .await
@@ -257,7 +259,11 @@ async fn reconcile_manager(
             &Patch::Apply(&key_secret),
         )
         .await?;
-    let key_secret_rv = key_secret.metadata.resource_version.clone().unwrap_or_default();
+    let key_secret_rv = key_secret
+        .metadata
+        .resource_version
+        .clone()
+        .unwrap_or_default();
 
     info!("Successfully reconciled Cluster Key Secret for {}", name);
 
@@ -469,9 +475,9 @@ fn pod_ready(pod: &Pod) -> bool {
         .as_ref()
         .and_then(|status| status.conditions.as_ref())
         .map(|conditions| {
-            conditions.iter().any(|cond| {
-                cond.type_ == "Ready" && cond.status == "True"
-            })
+            conditions
+                .iter()
+                .any(|cond| cond.type_ == "Ready" && cond.status == "True")
         })
         .unwrap_or(false)
 }
@@ -507,10 +513,10 @@ fn generate_manager_statefulset(
 
     let owner_ref = manager.controller_owner_ref(&()).map(|o| vec![o]);
 
-	    let mut containers = vec![Container {
-	        name: "manager".to_string(),
-	        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
-	        env: Some(vec![
+    let mut containers = vec![Container {
+        name: "manager".to_string(),
+        image: Some(format!("wazuh/wazuh-manager:{}", manager.spec.version)),
+        env: Some(vec![
             EnvVar {
                 name: "INDEXER_URL".to_string(),
                 value: Some(format!(
@@ -547,62 +553,62 @@ fn generate_manager_statefulset(
                 }),
                 ..Default::default()
             },
-	            EnvVar {
-	                name: "API_PASSWORD".to_string(),
-	                value_from: Some(EnvVarSource {
-	                    secret_key_ref: Some(SecretKeySelector {
-	                        key: "password".to_string(),
-	                        name: api_secret_name.to_string(),
-	                        optional: Some(false),
-	                    }),
-	                    ..Default::default()
-	                }),
-	                ..Default::default()
-	            },
-	            EnvVar {
-	                name: "WAZUH_CLUSTER_KEY".to_string(),
-	                value_from: Some(EnvVarSource {
-	                    secret_key_ref: Some(SecretKeySelector {
-	                        key: "cluster-key".to_string(),
-	                        name: format!("{}-key", name),
-	                        optional: Some(false),
-	                    }),
-	                    ..Default::default()
-	                }),
-	                ..Default::default()
-	            },
-	        ]),
-	        security_context: Some(SecurityContext {
-	            capabilities: Some(Capabilities {
-	                add: Some(vec!["SYS_CHROOT".to_string()]),
-	                ..Default::default()
-	            }),
+            EnvVar {
+                name: "API_PASSWORD".to_string(),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "password".to_string(),
+                        name: api_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "WAZUH_CLUSTER_KEY".to_string(),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "cluster-key".to_string(),
+                        name: format!("{}-key", name),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        security_context: Some(SecurityContext {
+            capabilities: Some(Capabilities {
+                add: Some(vec!["SYS_CHROOT".to_string()]),
+                ..Default::default()
+            }),
             ..Default::default()
         }),
-	        volume_mounts: Some(vec![
-	            VolumeMount {
-	                name: "config".to_string(),
-	                mount_path: "/wazuh-config-mount/etc".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "rules".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "decoders".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
-	                ..Default::default()
-	            },
-	            VolumeMount {
-	                name: "tls".to_string(),
-	                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
-	                ..Default::default()
-	            },
-	        ]),
-	        ..Default::default()
-	    }];
+        volume_mounts: Some(vec![
+            VolumeMount {
+                name: "config".to_string(),
+                mount_path: "/wazuh-config-mount/etc".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "rules".to_string(),
+                mount_path: "/wazuh-config-mount/etc/rules".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "decoders".to_string(),
+                mount_path: "/wazuh-config-mount/etc/decoders".to_string(),
+                ..Default::default()
+            },
+            VolumeMount {
+                name: "tls".to_string(),
+                mount_path: "/wazuh-config-mount/etc/certs".to_string(),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    }];
 
     if nginx_enabled {
         containers.push(Container {
@@ -953,8 +959,8 @@ fn generate_config_map(
     let indexer_name = indexer.name_any();
     let indexer_ns = indexer.namespace().unwrap();
 
-	    let ossec_conf = format!(
-	        r#"<ossec_config>
+    let ossec_conf = format!(
+        r#"<ossec_config>
 	  <cluster>
 	    <name>wazuh</name>
 	    <node_name>to_be_replaced_by_hostname</node_name>
@@ -983,11 +989,11 @@ fn generate_config_map(
     </hosts>
   </indexer>
 	</ossec_config>"#,
-	        name,
-	        manager.namespace().unwrap(),
-	        indexer_name,
-	        indexer_ns
-	    );
+        name,
+        manager.namespace().unwrap(),
+        indexer_name,
+        indexer_ns
+    );
 
     let mut data = BTreeMap::new();
     data.insert("ossec.conf".to_string(), ossec_conf);

@@ -96,13 +96,7 @@ impl ConfigAggregator {
 
         let mut content = configs
             .iter()
-            .filter(|c| {
-                Self::selectors_match(
-                    labels,
-                    c.spec.node_selector.as_ref(),
-                    None,
-                )
-            })
+            .filter(|c| Self::selectors_match(labels, c.spec.node_selector.as_ref(), None))
             .map(|c| c.spec.content.as_str())
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -246,7 +240,11 @@ impl ConfigAggregator {
             });
         }
 
-        ports.sort_by(|a, b| a.port.cmp(&b.port).then_with(|| a.protocol.cmp(&b.protocol)));
+        ports.sort_by(|a, b| {
+            a.port
+                .cmp(&b.port)
+                .then_with(|| a.protocol.cmp(&b.protocol))
+        });
         ports.dedup_by(|a, b| a.port == b.port && a.protocol == b.protocol);
 
         Ok(ports)
