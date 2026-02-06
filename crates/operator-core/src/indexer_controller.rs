@@ -396,29 +396,6 @@ async fn cleanup_indexer(
     Ok(Action::await_change())
 }
 
-async fn check_quorum(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<bool> {
-    let ns = indexer.namespace().unwrap();
-    let name = indexer.name_any();
-    let workload_name = indexer
-        .spec
-        .workload
-        .as_ref()
-        .and_then(|w| w.name.clone())
-        .unwrap_or_else(|| name.clone());
-    let sts_api: Api<StatefulSet> = Api::namespaced(client, &ns);
-
-    let sts = sts_api.get(&workload_name).await?;
-    let ready_replicas = sts
-        .status
-        .as_ref()
-        .and_then(|s| s.ready_replicas)
-        .unwrap_or(0);
-
-    // Simple quorum check: at least half + 1 nodes must be ready
-    let quorum = (indexer.spec.replicas / 2) + 1;
-    Ok(ready_replicas >= quorum)
-}
-
 async fn update_status(indexer: &WazuhIndexerCluster, client: kube::Client) -> Result<()> {
     let ns = indexer.namespace().unwrap();
     let name = indexer.name_any();
