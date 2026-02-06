@@ -155,7 +155,7 @@ async fn reconcile_manager(
         .as_ref()
         .map(|n| n.enabled)
         .unwrap_or(true);
-    if nginx_enabled {
+    let nginx_config_rv = if nginx_enabled {
         let nginx_cm = generate_nginx_config_map(&manager)?;
         cm_api
             .patch(
@@ -163,8 +163,13 @@ async fn reconcile_manager(
                 &PatchParams::apply("wazuh-operator"),
                 &Patch::Apply(&nginx_cm),
             )
-            .await?;
-    }
+            .await?
+            .metadata
+            .resource_version
+            .unwrap_or_else(|| "missing".to_string())
+    } else {
+        "disabled".to_string()
+    };
 
     // 6. Create StatefulSet
     let tls_secret_name = format!("{}-tls", cluster_name);
@@ -194,6 +199,7 @@ async fn reconcile_manager(
         &indexer_auth_secret_name,
         &tls_secret_rv,
         &key_secret_rv,
+        &nginx_config_rv,
         &config_hash,
         &listener_ports,
     )?;
@@ -549,7 +555,9 @@ http {
         ssl_ciphers HIGH:!aNULL:!MD5;
 
         location / {
-            proxy_pass http://127.0.0.1:55000;
+            proxy_pass https://127.0.0.1:55000;
+            proxy_ssl_verify off;
+            proxy_ssl_server_name on;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -592,6 +600,7 @@ fn generate_statefulset(
     indexer_auth_secret_name: &str,
     tls_secret_rv: &str,
     key_secret_rv: &str,
+    nginx_config_rv: &str,
     config_hash: &str,
     listener_ports: &[ListenerPort],
 ) -> Result<StatefulSet> {
@@ -921,6 +930,10 @@ fn generate_statefulset(
                             ann.insert(
                                 "wazuh.adorsys.team/config-hash".to_string(),
                                 config_hash.to_string(),
+                            );
+                            ann.insert(
+                                "wazuh.adorsys.team/nginx-config-rv".to_string(),
+                                nginx_config_rv.to_string(),
                             );
                             ann
                         }),

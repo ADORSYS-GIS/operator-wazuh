@@ -83,7 +83,7 @@ async fn reconcile_config(
     cm_api
         .patch(
             &cm_name,
-            &PatchParams::apply("wazuh-operator"),
+            &PatchParams::apply("wazuh-operator").force(),
             &Patch::Apply(&cm),
         )
         .await?;
@@ -134,6 +134,13 @@ fn generate_configmap(
     internal_users: Option<BTreeMap<String, InternalUser>>,
 ) -> Result<ConfigMap> {
     let mut data = BTreeMap::new();
+
+    data.insert(
+        "nodes_dn.yml".to_string(),
+        serde_yaml::to_string(&default_nodes_dn_doc()).map_err(|e| {
+            Error::ValidationError(format!("Failed to render nodes_dn.yml: {}", e))
+        })?,
+    );
 
     if let Some(roles) = &config.spec.roles {
         let value = with_security_meta(
@@ -340,6 +347,21 @@ fn default_internal_users() -> BTreeMap<String, InternalUser> {
     users
 }
 
+fn default_nodes_dn_doc() -> serde_yaml::Value {
+    serde_yaml::from_str(
+        r#"
+_meta:
+  type: nodesdn
+  config_version: 2
+wazuh-cluster:
+  nodes_dn:
+    - "CN=*,OU=Wazuh,O=Wazuh,L=California,C=US"
+    - "C=US,L=California,O=Wazuh,OU=Wazuh,CN=*"
+"#,
+    )
+    .expect("valid static nodes_dn yaml")
+}
+
 fn secret_value(secret: &Secret, key: &str) -> Option<String> {
     if let Some(data) = &secret.data {
         if let Some(value) = data.get(key) {
@@ -383,7 +405,7 @@ async fn ensure_cronjob(
         cronjob_api
             .patch(
                 &cronjob_name,
-                &PatchParams::apply("wazuh-operator"),
+                &PatchParams::apply("wazuh-operator").force(),
                 &Patch::Apply(&new_cronjob),
             )
             .await?;
@@ -442,12 +464,12 @@ fn generate_cronjob(
                               fi\n\
                             }}\n\
                             run_cfg /etc/wazuh-indexer/security-config/config.yml config\n\
+                            run_cfg /etc/wazuh-indexer/security-config/nodes_dn.yml nodesdn\n\
                             run_cfg /etc/wazuh-indexer/security-config/roles.yml roles\n\
                             run_cfg /etc/wazuh-indexer/security-config/roles_mapping.yml rolesmapping\n\
                             run_cfg /etc/wazuh-indexer/security-config/internal_users.yml internalusers\n\
                             run_cfg /etc/wazuh-indexer/security-config/action_groups.yml actiongroups\n\
                             run_cfg /etc/wazuh-indexer/security-config/tenants.yml tenants\n\
-                            run_cfg /etc/wazuh-indexer/security-config/nodes_dn.yml nodesdn\n\
                             run_cfg /etc/wazuh-indexer/security-config/whitelist.yml whitelist\n\
                             run_cfg /etc/wazuh-indexer/security-config/allowlist.yml allowlist\n\
                             echo 'Security config apply completed'",

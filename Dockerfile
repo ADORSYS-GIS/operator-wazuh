@@ -10,9 +10,6 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN --mount=type=cache,target=/root/.cargo \
-      cargo fetch
-
 # Build the operator-cli which contains the run command
 RUN cargo build --release -p operator-cli
 

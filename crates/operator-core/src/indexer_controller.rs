@@ -511,6 +511,7 @@ plugins.security.authcz.admin_dn:
   - C=US,L=California,O=Wazuh,OU=Wazuh,CN=admin
 plugins.security.nodes_dn:
   - "CN=*,OU=Wazuh,O=Wazuh,L=California,C=US"
+  - "C=US,L=California,O=Wazuh,OU=Wazuh,CN=*"
 plugins.security.restapi.roles_enabled:
   - "all_access"
   - "security_rest_api_access"

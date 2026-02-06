@@ -98,7 +98,7 @@ async fn reconcile_dashboard(
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     let cm = generate_dashboard_config_map(&dashboard, wazuh_api_url.as_deref())?;
 
-    cm_api
+    let reconciled_config_map = cm_api
         .patch(
             &format!("{}-config", name),
             &PatchParams::apply("wazuh-operator"),
@@ -277,6 +277,10 @@ async fn reconcile_dashboard(
         .ok()
         .and_then(|s| s.metadata.resource_version)
         .unwrap_or_else(|| "missing".to_string());
+    let dashboard_config_rv = reconciled_config_map
+        .metadata
+        .resource_version
+        .unwrap_or_else(|| "missing".to_string());
 
     // 6. Create Deployment
     let deploy_api: Api<Deployment> = Api::namespaced(client.clone(), &ns);
@@ -287,6 +291,7 @@ async fn reconcile_dashboard(
         wazuh_api_url.as_deref(),
         manager_api_secret_name.as_deref(),
         &tls_secret_rv,
+        &dashboard_config_rv,
         &workload_name,
     )?;
 
@@ -450,6 +455,7 @@ fn generate_dashboard_deployment(
     wazuh_api_url: Option<&str>,
     manager_api_secret_name: Option<&str>,
     tls_secret_rv: &str,
+    dashboard_config_rv: &str,
     workload_name: &str,
 ) -> Result<Deployment> {
     let name = dashboard.name_any();
@@ -668,6 +674,10 @@ fn generate_dashboard_deployment(
                             pod_annotations.insert(
                                 "wazuh.adorsys.team/tls-secret-rv".to_string(),
                                 tls_secret_rv.to_string(),
+                            );
+                            pod_annotations.insert(
+                                "wazuh.adorsys.team/configmap-rv".to_string(),
+                                dashboard_config_rv.to_string(),
                             );
                             pod_annotations
                         }),
