@@ -1,6 +1,6 @@
 //! WazuhDashboard controller implementation
 
-use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
+use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
 use crate::pod_template::apply_pod_template_patch;
@@ -11,10 +11,10 @@ use k8s_openapi::api::core::v1::{
     SecretKeySelector, Service, ServicePort, ServiceSpec, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
-use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::ResourceExt;
 use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -96,7 +96,7 @@ async fn reconcile_dashboard(
 
     // 3. Generate opensearch_dashboards.yml ConfigMap
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
-    let cm = generate_dashboard_config_map(&dashboard, manager.is_some())?;
+    let cm = generate_dashboard_config_map(&dashboard, wazuh_api_url.as_deref())?;
 
     cm_api
         .patch(
@@ -129,12 +129,15 @@ async fn reconcile_dashboard(
             ResolvedCa::SelfSigned {
                 ca_cert, ca_key, ..
             } => {
-                let server_ready = secret_api
-                    .get(&tls_secret_name)
-                    .await
-                    .ok()
-                    .map_or(false, |s| secret_has_keys(&s, &server_keys));
-                if !server_ready {
+                let server_secret = secret_api.get(&tls_secret_name).await.ok();
+                let server_ready = server_secret
+                    .as_ref()
+                    .map_or(false, |s| secret_has_keys(s, &server_keys));
+                let server_ca_matches = server_secret
+                    .as_ref()
+                    .and_then(|s| secret_value(s, "ca.crt"))
+                    .map_or(false, |crt| crt == ca_cert);
+                if !server_ready || !server_ca_matches {
                     let (server_cert, server_key) = TlsManager::generate_server_cert(
                         &ca_cert,
                         &ca_key,
@@ -801,7 +804,7 @@ async fn resolve_dashboard_indexer(
 
 fn generate_dashboard_config_map(
     dashboard: &WazuhDashboard,
-    include_wazuh_yml: bool,
+    wazuh_api_url: Option<&str>,
 ) -> Result<ConfigMap> {
     let name = dashboard.name_any();
     let config_yml = build_opensearch_dashboards_config(dashboard)?;
@@ -829,11 +832,13 @@ http {
         ssl_ciphers HIGH:!aNULL:!MD5;
 
         location / {
-            proxy_pass http://dashboard;
+            proxy_pass https://dashboard;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_ssl_verify off;
+            proxy_ssl_server_name on;
         }
 
         location /healthz {
@@ -846,15 +851,13 @@ http {
 
     let mut data = BTreeMap::new();
     data.insert("opensearch_dashboards.yml".to_string(), config_yml);
-    if include_wazuh_yml {
+    if let Some(url) = wazuh_api_url {
         data.insert(
             "wazuh.yml".to_string(),
-            r#"hosts:
-  - url: "${WAZUH_API_URL}"
-    user: "${API_USERNAME}"
-    password: "${API_PASSWORD}"
-"#
-            .to_string(),
+            format!(
+                "hosts:\n  - url: \"{}\"\n",
+                url
+            ),
         );
     }
     data.insert(
@@ -892,268 +895,29 @@ http {
 }
 
 fn build_opensearch_dashboards_config(dashboard: &WazuhDashboard) -> Result<String> {
-    let mut root = serde_yaml::Mapping::new();
+    let mut config = r#"server.host: "0.0.0.0"
+server.port: 5601
+opensearch.hosts: ["${OPENSEARCH_HOSTS}"]
+opensearch.ssl.verificationMode: none
+opensearch.username: "${DASHBOARD_USERNAME}"
+opensearch.password: "${DASHBOARD_PASSWORD}"
+server.ssl.enabled: true
+server.ssl.key: "/usr/share/wazuh-dashboard/certs/tls.key"
+server.ssl.certificate: "/usr/share/wazuh-dashboard/certs/tls.crt"
+opensearch.ssl.certificateAuthorities: ["/usr/share/wazuh-dashboard/certs/ca.crt"]
+"#
+    .to_string();
 
-    // Baseline defaults
-    set_config_value(
-        &mut root,
-        "server.name",
-        serde_yaml::Value::String("wazuh-dashboard".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "server.host",
-        serde_yaml::Value::String("0.0.0.0".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "server.port",
-        serde_yaml::Value::Number(serde_yaml::Number::from(5601)),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.hosts",
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-            "${OPENSEARCH_HOSTS}".to_string(),
-        )]),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.ssl.verificationMode",
-        serde_yaml::Value::String("none".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.username",
-        serde_yaml::Value::String("${DASHBOARD_USERNAME}".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.password",
-        serde_yaml::Value::String("${DASHBOARD_PASSWORD}".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.requestHeadersAllowlist",
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("Authorization".to_string()),
-            serde_yaml::Value::String("securitytenant".to_string()),
-        ]),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch_security.multitenancy.enabled",
-        serde_yaml::Value::Bool(true),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch_security.multitenancy.tenants.preferred",
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("Global".to_string()),
-            serde_yaml::Value::String("Private".to_string()),
-        ]),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch_security.readonly_mode.roles",
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-            "kibana_read_only".to_string(),
-        )]),
-    );
-    set_config_value(
-        &mut root,
-        "server.ssl.enabled",
-        serde_yaml::Value::Bool(true),
-    );
-    set_config_value(
-        &mut root,
-        "server.ssl.key",
-        serde_yaml::Value::String("/usr/share/wazuh-dashboard/certs/tls.key".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "server.ssl.certificate",
-        serde_yaml::Value::String("/usr/share/wazuh-dashboard/certs/tls.crt".to_string()),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch.ssl.certificateAuthorities",
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-            "/usr/share/wazuh-dashboard/certs/ca.crt".to_string(),
-        )]),
-    );
-    set_config_value(
-        &mut root,
-        "uiSettings.overrides.defaultRoute",
-        serde_yaml::Value::String("/app/wz-home".to_string()),
-    );
-
-    let unauthenticated_routes = dashboard
-        .spec
-        .config
-        .as_ref()
-        .and_then(|cfg| cfg.unauthenticated_routes.clone())
-        .unwrap_or_else(|| vec!["/api/status".to_string()]);
-    set_config_value(
-        &mut root,
-        "opensearch_security.auth.unauthenticated_routes",
-        serde_yaml::Value::Sequence(
-            unauthenticated_routes
-                .into_iter()
-                .map(serde_yaml::Value::String)
-                .collect(),
-        ),
-    );
-
-    let session_cfg = dashboard
-        .spec
-        .config
-        .as_ref()
-        .and_then(|cfg| cfg.session.as_ref());
-    let cookie_ttl = session_cfg
-        .and_then(|s| s.cookie_ttl_ms)
-        .unwrap_or(900_000_i64);
-    let session_ttl = session_cfg
-        .and_then(|s| s.session_ttl_ms)
-        .unwrap_or(900_000_i64);
-    let keepalive = session_cfg.and_then(|s| s.keepalive).unwrap_or(true);
-
-    set_config_value(
-        &mut root,
-        "opensearch_security.cookie.ttl",
-        serde_yaml::Value::Number(serde_yaml::Number::from(cookie_ttl)),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch_security.session.ttl",
-        serde_yaml::Value::Number(serde_yaml::Number::from(session_ttl)),
-    );
-    set_config_value(
-        &mut root,
-        "opensearch_security.session.keepalive",
-        serde_yaml::Value::Bool(keepalive),
-    );
-
-    if let Some(auth) = dashboard.spec.auth.as_ref().filter(|auth| auth.enabled) {
-        if let Some(openid) = auth.openid.as_ref() {
-            set_config_value(
-                &mut root,
-                "opensearch_security.auth.type",
-                serde_yaml::Value::String("openid".to_string()),
-            );
-            set_config_value(
-                &mut root,
-                "opensearch_security.openid.connect_url",
-                serde_yaml::Value::String(openid.connect_url.clone()),
-            );
-            set_config_value(
-                &mut root,
-                "opensearch_security.openid.client_id",
-                serde_yaml::Value::String(openid.client_id.clone()),
-            );
-            if let Some(client_secret) = openid.client_secret.as_ref() {
-                set_config_value(
-                    &mut root,
-                    "opensearch_security.openid.client_secret",
-                    serde_yaml::Value::String(client_secret.clone()),
-                );
-            } else if openid.client_secret_ref.is_some() {
-                set_config_value(
-                    &mut root,
-                    "opensearch_security.openid.client_secret",
-                    serde_yaml::Value::String("${OPENSEARCH_OPENID_CLIENT_SECRET}".to_string()),
-                );
-            }
-            if let Some(scope) = openid.scope.as_ref() {
-                set_config_value(
-                    &mut root,
-                    "opensearch_security.openid.scope",
-                    serde_yaml::Value::String(scope.clone()),
-                );
-            }
-            if let Some(base_redirect_url) = openid.base_redirect_url.as_ref() {
-                set_config_value(
-                    &mut root,
-                    "opensearch_security.openid.base_redirect_url",
-                    serde_yaml::Value::String(base_redirect_url.clone()),
-                );
-            }
-        } else if let Some(auth_type) = auth.auth_type.as_ref() {
-            set_config_value(
-                &mut root,
-                "opensearch_security.auth.type",
-                serde_yaml::Value::String(auth_type.clone()),
-            );
+    if let Some(custom) = dashboard.spec.custom_opensearch_dashboard.as_ref() {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            config.push('\n');
+            config.push_str(custom);
+            config.push('\n');
         }
     }
 
-    if let Some(branding) = dashboard
-        .spec
-        .config
-        .as_ref()
-        .and_then(|cfg| cfg.branding.as_ref())
-    {
-        let mut branding_map = serde_yaml::Mapping::new();
-        if let Some(application_title) = branding.application_title.as_ref() {
-            branding_map.insert(
-                serde_yaml::Value::String("applicationTitle".to_string()),
-                serde_yaml::Value::String(application_title.clone()),
-            );
-        }
-        if let Some(favicon_url) = branding.favicon_url.as_ref() {
-            branding_map.insert(
-                serde_yaml::Value::String("faviconUrl".to_string()),
-                serde_yaml::Value::String(favicon_url.clone()),
-            );
-        }
-        insert_branding_image(
-            &mut branding_map,
-            "loadingLogo",
-            branding.loading_logo_url.as_ref(),
-        );
-        insert_branding_image(&mut branding_map, "logo", branding.logo_url.as_ref());
-        insert_branding_image(&mut branding_map, "mark", branding.mark_url.as_ref());
-        if let Some(use_expanded_header) = branding.use_expanded_header {
-            branding_map.insert(
-                serde_yaml::Value::String("useExpandedHeader".to_string()),
-                serde_yaml::Value::Bool(use_expanded_header),
-            );
-        }
-
-        if !branding_map.is_empty() {
-            set_config_value(
-                &mut root,
-                "opensearchDashboards.branding",
-                serde_yaml::Value::Mapping(branding_map),
-            );
-        }
-    }
-
-    if let Some(overrides) = dashboard
-        .spec
-        .config
-        .as_ref()
-        .and_then(|cfg| cfg.overrides.as_ref())
-    {
-        for (key, value) in overrides {
-            let yaml_value = serde_yaml::to_value(value).map_err(|e| {
-                Error::ValidationError(format!(
-                    "Failed to render config override {} for dashboard {}/{}: {}",
-                    key,
-                    dashboard.namespace().unwrap_or_default(),
-                    dashboard.name_any(),
-                    e
-                ))
-            })?;
-            set_config_value(&mut root, key, yaml_value);
-        }
-    }
-
-    let rendered = serde_yaml::to_string(&root).map_err(|e| {
-        Error::ValidationError(format!("Failed to render opensearch_dashboards.yml: {}", e))
-    })?;
-
-    Ok(rendered)
+    Ok(config)
 }
 
 fn resolve_dashboard_opensearch_hosts(
@@ -1198,42 +962,11 @@ fn resolve_dashboard_wazuh_api_url(
     let manager = manager?;
     let manager_ns = manager.namespace().unwrap_or_default();
     let manager_name = manager.name_any();
-    let api_port = if manager
-        .spec
-        .nginx
-        .as_ref()
-        .map(|n| n.enabled)
-        .unwrap_or(true)
-    {
-        8443
-    } else {
-        55000
-    };
 
     Some(format!(
-        "https://{}.{}.svc.cluster.local:{}",
-        manager_name, manager_ns, api_port
+        "https://{}.{}.svc.cluster.local",
+        manager_name, manager_ns
     ))
-}
-
-fn set_config_value(root: &mut serde_yaml::Mapping, key: &str, value: serde_yaml::Value) {
-    root.insert(serde_yaml::Value::String(key.to_string()), value);
-}
-
-fn insert_branding_image(branding_map: &mut serde_yaml::Mapping, key: &str, url: Option<&String>) {
-    let Some(url) = url else {
-        return;
-    };
-
-    let mut image = serde_yaml::Mapping::new();
-    image.insert(
-        serde_yaml::Value::String("defaultUrl".to_string()),
-        serde_yaml::Value::String(url.clone()),
-    );
-    branding_map.insert(
-        serde_yaml::Value::String(key.to_string()),
-        serde_yaml::Value::Mapping(image),
-    );
 }
 
 /// Error policy for WazuhDashboard reconciliation
@@ -1257,4 +990,18 @@ fn secret_has_keys(secret: &Secret, keys: &[&str]) -> bool {
                 .as_ref()
                 .map_or(false, |data| data.contains_key(*key))
     })
+}
+
+fn secret_value(secret: &Secret, key: &str) -> Option<String> {
+    if let Some(data) = &secret.data {
+        if let Some(value) = data.get(key) {
+            return String::from_utf8(value.0.clone()).ok();
+        }
+    }
+    if let Some(data) = &secret.string_data {
+        if let Some(value) = data.get(key) {
+            return Some(value.clone());
+        }
+    }
+    None
 }

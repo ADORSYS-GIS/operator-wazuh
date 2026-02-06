@@ -1,6 +1,6 @@
 //! WazuhIndexerCluster controller implementation
 
-use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
+use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::pod_template::apply_pod_template_patch;
 use crate::tls::TlsManager;
@@ -13,10 +13,10 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
-use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::ResourceExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -125,18 +125,24 @@ async fn reconcile_indexer(
             ResolvedCa::SelfSigned {
                 ca_cert, ca_key, ..
             } => {
-                let server_ready = secret_api
-                    .get(&tls_secret_name)
-                    .await
-                    .ok()
-                    .map_or(false, |s| secret_has_keys(&s, &server_keys));
-                let admin_ready = secret_api
-                    .get(&admin_tls_secret_name)
-                    .await
-                    .ok()
-                    .map_or(false, |s| secret_has_keys(&s, &admin_keys));
+                let server_secret = secret_api.get(&tls_secret_name).await.ok();
+                let admin_secret = secret_api.get(&admin_tls_secret_name).await.ok();
+                let server_ready = server_secret
+                    .as_ref()
+                    .map_or(false, |s| secret_has_keys(s, &server_keys));
+                let admin_ready = admin_secret
+                    .as_ref()
+                    .map_or(false, |s| secret_has_keys(s, &admin_keys));
+                let server_ca_matches = server_secret
+                    .as_ref()
+                    .and_then(|s| secret_value(s, "ca.crt"))
+                    .map_or(false, |crt| crt == ca_cert);
+                let admin_ca_matches = admin_secret
+                    .as_ref()
+                    .and_then(|s| secret_value(s, "ca.crt"))
+                    .map_or(false, |crt| crt == ca_cert);
 
-                if !server_ready || !admin_ready {
+                if !server_ready || !admin_ready || !server_ca_matches || !admin_ca_matches {
                     let (server_cert, server_key) = TlsManager::generate_server_cert(
                         &ca_cert,
                         &ca_key,
@@ -891,4 +897,18 @@ fn secret_has_keys(secret: &k8s_openapi::api::core::v1::Secret, keys: &[&str]) -
                 .as_ref()
                 .map_or(false, |data| data.contains_key(*key))
     })
+}
+
+fn secret_value(secret: &k8s_openapi::api::core::v1::Secret, key: &str) -> Option<String> {
+    if let Some(data) = &secret.data {
+        if let Some(value) = data.get(key) {
+            return String::from_utf8(value.0.clone()).ok();
+        }
+    }
+    if let Some(data) = &secret.string_data {
+        if let Some(value) = data.get(key) {
+            return Some(value.clone());
+        }
+    }
+    None
 }

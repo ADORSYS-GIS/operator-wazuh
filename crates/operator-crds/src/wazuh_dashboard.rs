@@ -1,8 +1,8 @@
 //! WazuhDashboard CRD definition
 
-use crate::WorkloadConfig;
 use crate::pod_template::PodTemplateSpecPatch;
 use crate::wazuh_ca::WazuhCARef;
+use crate::WorkloadConfig;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,9 @@ pub struct WazuhDashboardSpec {
     /// Dashboard runtime configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<DashboardConfig>,
+    /// Extra opensearch_dashboards.yml settings appended after generated base config
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_opensearch_dashboard: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]

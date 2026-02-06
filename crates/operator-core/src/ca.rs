@@ -3,12 +3,13 @@
 use crate::error::{Error, Result};
 use crate::tls::{CertificateSubject, TlsManager};
 use k8s_openapi::api::core::v1::Secret;
-use kube::api::{Api, Patch, PatchParams};
+use kube::api::{Api, ListParams, Patch, PatchParams};
 use kube::{Resource, ResourceExt};
 use operator_crds::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef, WazuhCASubject};
 use std::collections::BTreeMap;
 
 pub const DEFAULT_WAZUH_CA_NAME: &str = "wazuh-ca";
+pub const LEGACY_DEFAULT_WAZUH_CA_NAME: &str = "wazuh";
 
 pub enum ResolvedCa {
     SelfSigned {
@@ -43,20 +44,44 @@ pub async fn resolve_default_wazuh_ca(
     namespace: &str,
 ) -> Result<Option<ResolvedCa>> {
     let ca_api: Api<WazuhCA> = Api::namespaced(client.clone(), namespace);
-    let ca = match ca_api.get(DEFAULT_WAZUH_CA_NAME).await {
-        Ok(ca) => ca,
-        Err(kube::Error::Api(ae)) if ae.code == 404 => return Ok(None),
-        Err(e) => {
-            return Err(Error::ReconciliationError(format!(
-                "Failed to fetch default WazuhCA {}/{}: {}",
-                namespace, DEFAULT_WAZUH_CA_NAME, e
-            )));
+    let ca = if let Some(ca) = get_default_named_ca(&ca_api, namespace).await? {
+        ca
+    } else {
+        let list = ca_api.list(&ListParams::default()).await.map_err(|e| {
+            Error::ReconciliationError(format!(
+                "Failed to list WazuhCA resources in {}: {}",
+                namespace, e
+            ))
+        })?;
+        if list.items.len() == 1 {
+            list.items
+                .into_iter()
+                .next()
+                .expect("len checked to be 1")
+        } else {
+            return Ok(None);
         }
     };
 
     resolve_wazuh_ca_from_resource(client, namespace, ca)
         .await
         .map(Some)
+}
+
+async fn get_default_named_ca(ca_api: &Api<WazuhCA>, namespace: &str) -> Result<Option<WazuhCA>> {
+    for name in [DEFAULT_WAZUH_CA_NAME, LEGACY_DEFAULT_WAZUH_CA_NAME] {
+        match ca_api.get(name).await {
+            Ok(ca) => return Ok(Some(ca)),
+            Err(kube::Error::Api(ae)) if ae.code == 404 => continue,
+            Err(e) => {
+                return Err(Error::ReconciliationError(format!(
+                    "Failed to fetch default WazuhCA {}/{}: {}",
+                    namespace, name, e
+                )));
+            }
+        }
+    }
+    Ok(None)
 }
 
 async fn resolve_wazuh_ca_from_resource(

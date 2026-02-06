@@ -1,6 +1,6 @@
 //! WazuhManagerCluster controller implementation
 
-use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
+use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
 use crate::tls::TlsManager;
@@ -11,10 +11,10 @@ use k8s_openapi::api::core::v1::{
     VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
-use kube::ResourceExt;
 use kube::api::{Api, ListParams, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
+use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
+use kube::ResourceExt;
 use operator_crds::{
     ListenerServiceMode, WazuhIndexerCluster, WazuhListener, WazuhManager, WazuhManagerCluster,
 };
@@ -87,6 +87,8 @@ async fn reconcile_manager(
     // 1. Resolve indexer reference
     let indexer = resolve_indexer(&manager, client.clone()).await?;
     info!("Resolved indexer: {}", indexer.name_any());
+    let indexer_auth_secret_name =
+        resolve_indexer_auth_secret_name(client.clone(), &ns, &indexer).await?;
 
     // Detect WazuhManager workloads for this cluster (new model)
     let workload_api: Api<WazuhManager> = Api::namespaced(client.clone(), &ns);
@@ -136,12 +138,15 @@ async fn reconcile_manager(
             ResolvedCa::SelfSigned {
                 ca_cert, ca_key, ..
             } => {
-                let server_ready = secret_api
-                    .get(&tls_secret_name)
-                    .await
-                    .ok()
-                    .map_or(false, |s| secret_has_keys(&s, &server_keys));
-                if !server_ready {
+                let server_secret = secret_api.get(&tls_secret_name).await.ok();
+                let server_ready = server_secret
+                    .as_ref()
+                    .map_or(false, |s| secret_has_keys(s, &server_keys));
+                let server_ca_matches = server_secret
+                    .as_ref()
+                    .and_then(|s| secret_value(s, "ca.crt"))
+                    .map_or(false, |crt| crt == ca_cert);
+                if !server_ready || !server_ca_matches {
                     let (server_cert, server_key) = TlsManager::generate_server_cert(
                         &ca_cert,
                         &ca_key,
@@ -365,6 +370,7 @@ async fn reconcile_manager(
             &manager,
             &indexer,
             &api_secret_name,
+            &indexer_auth_secret_name,
             &tls_secret_rv,
             &key_secret_rv,
         )?;
@@ -486,6 +492,7 @@ fn generate_manager_statefulset(
     manager: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
     api_secret_name: &str,
+    indexer_auth_secret_name: &str,
     tls_secret_rv: &str,
     key_secret_rv: &str,
 ) -> Result<StatefulSet> {
@@ -528,17 +535,58 @@ fn generate_manager_statefulset(
             },
             EnvVar {
                 name: "INDEXER_USERNAME".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             EnvVar {
                 name: "INDEXER_USER".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             EnvVar {
                 name: "INDEXER_PASSWORD".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "password".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "FILEBEAT_SSL_VERIFICATION_MODE".to_string(),
+                value: Some("full".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_CERTIFICATE_AUTHORITIES".to_string(),
+                value: Some("/var/ossec/etc/certs/ca.crt".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_CERTIFICATE".to_string(),
+                value: Some("/var/ossec/etc/certs/tls.crt".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_KEY".to_string(),
+                value: Some("/var/ossec/etc/certs/tls.key".to_string()),
                 ..Default::default()
             },
             EnvVar {
@@ -986,8 +1034,15 @@ fn generate_config_map(
 	    <enabled>yes</enabled>
 	    <hosts>
 	      <host>https://{}.{}.svc.cluster.local:9200</host>
-    </hosts>
-  </indexer>
+	    </hosts>
+	    <ssl>
+	      <certificate_authorities>
+	        <ca>/var/ossec/etc/certs/ca.crt</ca>
+	      </certificate_authorities>
+	      <certificate>/var/ossec/etc/certs/tls.crt</certificate>
+	      <key>/var/ossec/etc/certs/tls.key</key>
+	    </ssl>
+	  </indexer>
 	</ossec_config>"#,
         name,
         manager.namespace().unwrap(),
@@ -1174,6 +1229,28 @@ async fn resolve_indexer(
     Ok(indexer)
 }
 
+async fn resolve_indexer_auth_secret_name(
+    client: kube::Client,
+    namespace: &str,
+    indexer: &WazuhIndexerCluster,
+) -> Result<String> {
+    let secret_api: Api<Secret> = Api::namespaced(client, namespace);
+    let preferred = format!("{}-opensearch-auth", indexer.name_any());
+    if secret_api.get_opt(&preferred).await?.is_some() {
+        return Ok(preferred);
+    }
+
+    let legacy = "wazuh-dashboard-opensearch-auth";
+    if secret_api.get_opt(legacy).await?.is_some() {
+        return Ok(legacy.to_string());
+    }
+
+    Err(Error::ValidationError(format!(
+        "Missing indexer auth secret in namespace {}. Tried '{}' and '{}'",
+        namespace, preferred, legacy
+    )))
+}
+
 /// Error policy for WazuhManagerCluster reconciliation
 pub fn error_policy(
     _manager: Arc<WazuhManagerCluster>,
@@ -1195,4 +1272,18 @@ fn secret_has_keys(secret: &Secret, keys: &[&str]) -> bool {
                 .as_ref()
                 .map_or(false, |data| data.contains_key(*key))
     })
+}
+
+fn secret_value(secret: &Secret, key: &str) -> Option<String> {
+    if let Some(data) = &secret.data {
+        if let Some(value) = data.get(key) {
+            return String::from_utf8(value.0.clone()).ok();
+        }
+    }
+    if let Some(data) = &secret.string_data {
+        if let Some(value) = data.get(key) {
+            return Some(value.clone());
+        }
+    }
+    None
 }

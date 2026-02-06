@@ -276,7 +276,7 @@ async fn resolve_internal_users(
     };
 
     let secret_api: Api<Secret> = Api::namespaced(client, ns);
-    let mut resolved = BTreeMap::new();
+    let mut resolved = default_internal_users();
 
     for (name, user) in internal_users {
         let mut resolved_user = user.clone();
@@ -305,6 +305,39 @@ async fn resolve_internal_users(
     }
 
     Ok(Some(resolved))
+}
+
+fn default_internal_users() -> BTreeMap<String, InternalUser> {
+    let mut users = BTreeMap::new();
+    users.insert(
+        "admin".to_string(),
+        InternalUser {
+            hash: Some(
+                "$2a$12$VcCDgh2NDk07JGN0rjGbM.Ad41qVR/YFJcgHp0UGns5JDymv..TOG".to_string(),
+            ),
+            hash_secret_ref: None,
+            reserved: Some(true),
+            hidden: None,
+            description: Some("Demo admin user".to_string()),
+            backend_roles: Some(vec!["admin".to_string()]),
+            attributes: None,
+        },
+    );
+    users.insert(
+        "kibanaserver".to_string(),
+        InternalUser {
+            hash: Some(
+                "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H.".to_string(),
+            ),
+            hash_secret_ref: None,
+            reserved: Some(true),
+            hidden: Some(false),
+            description: Some("Demo OpenSearch Dashboards user".to_string()),
+            backend_roles: None,
+            attributes: None,
+        },
+    );
+    users
 }
 
 fn secret_value(secret: &Secret, key: &str) -> Option<String> {

@@ -7,7 +7,7 @@ use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PodSecurityContext, PodSpec, PodTemplateSpec, SecretKeySelector, SecurityContext, Volume,
+    PodSecurityContext, PodSpec, PodTemplateSpec, Secret, SecretKeySelector, SecurityContext, Volume,
     VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
@@ -84,6 +84,8 @@ async fn reconcile_manager(
     // 2. Resolve indexer reference from cluster
     let indexer = resolve_indexer(&cluster, client.clone()).await?;
     let api_secret_name = resolve_manager_api_secret_name(&manager, &cluster)?;
+    let indexer_auth_secret_name =
+        resolve_indexer_auth_secret_name(client.clone(), &ns, &indexer).await?;
 
     // 3. Build master nodes list
     let master_nodes = collect_master_nodes(client.clone(), &cluster_name, &cluster_ns).await?;
@@ -189,6 +191,7 @@ async fn reconcile_manager(
         &cluster,
         &indexer,
         &api_secret_name,
+        &indexer_auth_secret_name,
         &tls_secret_rv,
         &key_secret_rv,
         &config_hash,
@@ -252,6 +255,28 @@ async fn resolve_indexer(
     let indexer = indexer_api.get(name).await?;
 
     Ok(indexer)
+}
+
+async fn resolve_indexer_auth_secret_name(
+    client: kube::Client,
+    namespace: &str,
+    indexer: &WazuhIndexerCluster,
+) -> Result<String> {
+    let secret_api: Api<Secret> = Api::namespaced(client, namespace);
+    let preferred = format!("{}-opensearch-auth", indexer.name_any());
+    if secret_api.get_opt(&preferred).await?.is_some() {
+        return Ok(preferred);
+    }
+
+    let legacy = "wazuh-dashboard-opensearch-auth";
+    if secret_api.get_opt(legacy).await?.is_some() {
+        return Ok(legacy.to_string());
+    }
+
+    Err(Error::ValidationError(format!(
+        "Missing indexer auth secret in namespace {}. Tried '{}' and '{}'",
+        namespace, preferred, legacy
+    )))
 }
 
 async fn collect_master_nodes(
@@ -404,6 +429,13 @@ fn build_ossec_conf(
     <hosts>
       <host>https://{}.{}.svc.cluster.local:9200</host>
     </hosts>
+    <ssl>
+      <certificate_authorities>
+        <ca>/var/ossec/etc/certs/ca.crt</ca>
+      </certificate_authorities>
+      <certificate>/var/ossec/etc/certs/tls.crt</certificate>
+      <key>/var/ossec/etc/certs/tls.key</key>
+    </ssl>
   </indexer>
 </ossec_config>"#,
         node_type, nodes_block, indexer_name, indexer_ns
@@ -557,6 +589,7 @@ fn generate_statefulset(
     cluster: &WazuhManagerCluster,
     indexer: &WazuhIndexerCluster,
     api_secret_name: &str,
+    indexer_auth_secret_name: &str,
     tls_secret_rv: &str,
     key_secret_rv: &str,
     config_hash: &str,
@@ -635,17 +668,58 @@ fn generate_statefulset(
             },
             EnvVar {
                 name: "INDEXER_USERNAME".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             EnvVar {
                 name: "INDEXER_USER".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "username".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             EnvVar {
                 name: "INDEXER_PASSWORD".to_string(),
-                value: Some("admin".to_string()),
+                value_from: Some(EnvVarSource {
+                    secret_key_ref: Some(SecretKeySelector {
+                        key: "password".to_string(),
+                        name: indexer_auth_secret_name.to_string(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "FILEBEAT_SSL_VERIFICATION_MODE".to_string(),
+                value: Some("full".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_CERTIFICATE_AUTHORITIES".to_string(),
+                value: Some("/var/ossec/etc/certs/ca.crt".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_CERTIFICATE".to_string(),
+                value: Some("/var/ossec/etc/certs/tls.crt".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SSL_KEY".to_string(),
+                value: Some("/var/ossec/etc/certs/tls.key".to_string()),
                 ..Default::default()
             },
             EnvVar {

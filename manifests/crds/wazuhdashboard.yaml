@@ -150,6 +150,10 @@ spec:
                     nullable: true
                     type: string
                 type: object
+              custom_opensearch_dashboard:
+                description: Extra opensearch_dashboards.yml settings appended after generated base config
+                nullable: true
+                type: string
               indexer_cluster:
                 description: Reference to indexer cluster
                 properties:
