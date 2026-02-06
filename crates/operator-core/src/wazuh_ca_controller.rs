@@ -1,13 +1,13 @@
 //! WazuhCA controller implementation
 
 use crate::error::{Error, Result};
-use crate::tls::TlsManager;
+use crate::tls::{CertificateSubject, TlsManager};
 use k8s_openapi::api::core::v1::Secret;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
 use kube::{ResourceExt};
-use operator_crds::{WazuhCA, WazuhCAProvider};
+use operator_crds::{WazuhCA, WazuhCAProvider, WazuhCASubject};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -71,7 +71,8 @@ async fn reconcile_ca(ca: Arc<WazuhCA>, ctx: Arc<WazuhCaContext>) -> Result<Acti
                 .map_or(false, |s| secret_has_keys(&s, &["ca.crt", "ca.key"]));
 
             if !secret_ready {
-                let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+                let ca_subject = certificate_subject(ca.spec.subject.as_ref());
+                let (ca_cert, ca_key) = TlsManager::generate_ca(Some(&ca_subject))?;
                 let mut data = BTreeMap::new();
                 data.insert("ca.crt".to_string(), ca_cert);
                 data.insert("ca.key".to_string(), ca_key);
@@ -169,4 +170,20 @@ fn secret_has_keys(secret: &Secret, keys: &[&str]) -> bool {
                 .as_ref()
                 .map_or(false, |data| data.contains_key(*key))
     })
+}
+
+fn certificate_subject(subject: Option<&WazuhCASubject>) -> CertificateSubject {
+    let default = CertificateSubject::default();
+    let Some(subject) = subject else {
+        return default;
+    };
+
+    CertificateSubject {
+        common_name: subject.cn.clone().unwrap_or(default.common_name),
+        country: subject.c.clone().unwrap_or(default.country),
+        state_or_province: subject.st.clone().unwrap_or(default.state_or_province),
+        locality: subject.l.clone().unwrap_or(default.locality),
+        organization: subject.o.clone().unwrap_or(default.organization),
+        organizational_unit: subject.ou.clone().unwrap_or(default.organizational_unit),
+    }
 }

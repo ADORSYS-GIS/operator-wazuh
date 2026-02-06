@@ -5,25 +5,54 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
 
 pub struct TlsManager;
 
+#[derive(Clone, Debug)]
+pub struct CertificateSubject {
+    pub common_name: String,
+    pub country: String,
+    pub state_or_province: String,
+    pub locality: String,
+    pub organization: String,
+    pub organizational_unit: String,
+}
+
+impl Default for CertificateSubject {
+    fn default() -> Self {
+        Self {
+            common_name: "Wazuh Operator CA".to_string(),
+            country: "US".to_string(),
+            state_or_province: "California".to_string(),
+            locality: "California".to_string(),
+            organization: "Wazuh".to_string(),
+            organizational_unit: "Wazuh".to_string(),
+        }
+    }
+}
+
 impl TlsManager {
     /// Generate a self-signed CA certificate and key
-    pub fn generate_ca() -> Result<(String, String)> {
+    pub fn generate_ca(subject: Option<&CertificateSubject>) -> Result<(String, String)> {
+        let subject = subject.cloned().unwrap_or_default();
         let mut params = CertificateParams::default();
         params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         params.distinguished_name = DistinguishedName::new();
         params
             .distinguished_name
-            .push(DnType::CommonName, "Wazuh Operator CA");
+            .push(DnType::CommonName, subject.common_name);
         params
             .distinguished_name
-            .push(DnType::OrganizationalUnitName, "Wazuh");
+            .push(DnType::OrganizationalUnitName, subject.organizational_unit);
         params
             .distinguished_name
-            .push(DnType::OrganizationName, "Wazuh");
+            .push(DnType::OrganizationName, subject.organization);
         params
             .distinguished_name
-            .push(DnType::LocalityName, "California");
-        params.distinguished_name.push(DnType::CountryName, "US");
+            .push(DnType::LocalityName, subject.locality);
+        params
+            .distinguished_name
+            .push(DnType::StateOrProvinceName, subject.state_or_province);
+        params
+            .distinguished_name
+            .push(DnType::CountryName, subject.country);
         params.key_usages = vec![
             rcgen::KeyUsagePurpose::KeyCertSign,
             rcgen::KeyUsagePurpose::DigitalSignature,

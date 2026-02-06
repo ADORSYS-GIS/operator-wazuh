@@ -1,7 +1,7 @@
 //! WazuhManagerCluster controller implementation
 
 use crate::error::{Error, Result};
-use crate::ca::{resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use k8s_openapi::api::apps::v1::StatefulSet;
@@ -125,8 +125,14 @@ async fn reconcile_manager(
     let ca_ref = manager.spec.tls.as_ref().and_then(|t| t.ca_ref.as_ref());
     let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns);
 
-    if let Some(ca_ref) = ca_ref {
-        match resolve_wazuh_ca(client.clone(), &ns, ca_ref).await? {
+    let resolved_ca = if let Some(ca_ref) = ca_ref {
+        Some(resolve_wazuh_ca(client.clone(), &ns, ca_ref).await?)
+    } else {
+        resolve_default_wazuh_ca(client.clone(), &ns).await?
+    };
+
+    if let Some(resolved_ca) = resolved_ca {
+        match resolved_ca {
             ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
                 let server_ready = secret_api
                     .get(&tls_secret_name)
@@ -201,7 +207,7 @@ async fn reconcile_manager(
             .ok()
             .map_or(false, |s| secret_has_keys(&s, &server_keys));
         if !server_ready {
-            let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+            let (ca_cert, ca_key) = TlsManager::generate_ca(None)?;
             let (server_cert, server_key) = TlsManager::generate_server_cert(
                 &ca_cert,
                 &ca_key,

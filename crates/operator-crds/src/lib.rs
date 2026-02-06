@@ -26,7 +26,7 @@ pub mod volume_claim;
 pub mod wazuh_rule;
 
 pub use wazuh_agent_group::WazuhAgentGroup;
-pub use wazuh_ca::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef, WazuhCAStatus};
+pub use wazuh_ca::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef, WazuhCASubject, WazuhCAStatus};
 pub use wazuh_config::WazuhConfig;
 pub use wazuh_dashboard::{ImageConfig as DashboardImageConfig, WazuhDashboard};
 pub use wazuh_decoder::WazuhDecoder;

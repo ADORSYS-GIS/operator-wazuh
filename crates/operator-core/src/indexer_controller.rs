@@ -1,6 +1,6 @@
 //! WazuhIndexerCluster controller implementation
 
-use crate::ca::{resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
 use crate::cert_manager::Certificate;
 use crate::tls::TlsManager;
 use crate::pod_template::apply_pod_template_patch;
@@ -118,8 +118,14 @@ async fn reconcile_indexer(
     let admin_keys = ["ca.crt", "tls.crt", "tls.key"];
 
     let ca_ref = tls_config.and_then(|t| t.ca_ref.as_ref());
-    if let Some(ca_ref) = ca_ref {
-        match resolve_wazuh_ca(client.clone(), &ns, ca_ref).await? {
+    let resolved_ca = if let Some(ca_ref) = ca_ref {
+        Some(resolve_wazuh_ca(client.clone(), &ns, ca_ref).await?)
+    } else {
+        resolve_default_wazuh_ca(client.clone(), &ns).await?
+    };
+
+    if let Some(resolved_ca) = resolved_ca {
+        match resolved_ca {
             ResolvedCa::SelfSigned { ca_cert, ca_key, .. } => {
                 let server_ready = secret_api
                     .get(&tls_secret_name)
@@ -254,7 +260,7 @@ async fn reconcile_indexer(
             .map_or(false, |s| secret_has_keys(&s, &admin_keys));
 
         if !server_ready || !admin_ready {
-            let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+            let (ca_cert, ca_key) = TlsManager::generate_ca(None)?;
             let (server_cert, server_key) = TlsManager::generate_server_cert(
                 &ca_cert,
                 &ca_key,

@@ -1,7 +1,15 @@
 apiVersion: wazuh.adorsys.team/v1alpha1
 kind: WazuhCA
 metadata:
-  name: wazuh
+  name: wazuh-ca
   namespace: wazuh-test
 spec:
   provider: selfSigned
+  secret_name: wazuh-ca
+  subject:
+    cn: wazuh-test-ca
+    c: DE
+    st: Bavaria
+    l: Nuremberg
+    o: adorsys
+    ou: GIS

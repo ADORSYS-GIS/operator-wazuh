@@ -45,6 +45,35 @@ spec:
                 description: Name of the secret to store the CA (selfSigned only)
                 nullable: true
                 type: string
+              subject:
+                description: Subject values used when generating a self-signed CA
+                nullable: true
+                properties:
+                  c:
+                    description: X.509 Country (C)
+                    nullable: true
+                    type: string
+                  cn:
+                    description: X.509 Common Name (CN)
+                    nullable: true
+                    type: string
+                  l:
+                    description: X.509 Locality/City (L)
+                    nullable: true
+                    type: string
+                  o:
+                    description: X.509 Organization (O)
+                    nullable: true
+                    type: string
+                  ou:
+                    description: X.509 Organizational Unit (OU)
+                    nullable: true
+                    type: string
+                  st:
+                    description: X.509 State/Province (ST)
+                    nullable: true
+                    type: string
+                type: object
             required:
             - provider
             type: object

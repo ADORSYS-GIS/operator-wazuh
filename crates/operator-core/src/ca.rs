@@ -1,12 +1,14 @@
 //! Shared CA resolution for Wazuh resources
 
 use crate::error::{Error, Result};
-use crate::tls::TlsManager;
+use crate::tls::{CertificateSubject, TlsManager};
 use k8s_openapi::api::core::v1::Secret;
 use kube::api::{Api, Patch, PatchParams};
 use kube::{Resource, ResourceExt};
-use operator_crds::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef};
+use operator_crds::{IssuerRef, WazuhCA, WazuhCAProvider, WazuhCARef, WazuhCASubject};
 use std::collections::BTreeMap;
+
+pub const DEFAULT_WAZUH_CA_NAME: &str = "wazuh-ca";
 
 pub enum ResolvedCa {
     SelfSigned {
@@ -33,6 +35,35 @@ pub async fn resolve_wazuh_ca(
         ))
     })?;
 
+    resolve_wazuh_ca_from_resource(client, ns, ca).await
+}
+
+pub async fn resolve_default_wazuh_ca(
+    client: kube::Client,
+    namespace: &str,
+) -> Result<Option<ResolvedCa>> {
+    let ca_api: Api<WazuhCA> = Api::namespaced(client.clone(), namespace);
+    let ca = match ca_api.get(DEFAULT_WAZUH_CA_NAME).await {
+        Ok(ca) => ca,
+        Err(kube::Error::Api(ae)) if ae.code == 404 => return Ok(None),
+        Err(e) => {
+            return Err(Error::ReconciliationError(format!(
+                "Failed to fetch default WazuhCA {}/{}: {}",
+                namespace, DEFAULT_WAZUH_CA_NAME, e
+            )));
+        }
+    };
+
+    resolve_wazuh_ca_from_resource(client, namespace, ca)
+        .await
+        .map(Some)
+}
+
+async fn resolve_wazuh_ca_from_resource(
+    client: kube::Client,
+    ns: &str,
+    ca: WazuhCA,
+) -> Result<ResolvedCa> {
     match ca.spec.provider {
         WazuhCAProvider::SelfSigned => {
             let ca_secret_name = ca
@@ -55,7 +86,8 @@ pub async fn resolve_wazuh_ca(
                 }
             }
 
-            let (ca_cert, ca_key) = TlsManager::generate_ca()?;
+            let ca_subject = certificate_subject(ca.spec.subject.as_ref());
+            let (ca_cert, ca_key) = TlsManager::generate_ca(Some(&ca_subject))?;
             let mut data = BTreeMap::new();
             data.insert("ca.crt".to_string(), ca_cert.clone());
             data.insert("ca.key".to_string(), ca_key.clone());
@@ -103,6 +135,22 @@ pub async fn resolve_wazuh_ca(
 
             Ok(ResolvedCa::CertManager { issuer_ref })
         }
+    }
+}
+
+fn certificate_subject(subject: Option<&WazuhCASubject>) -> CertificateSubject {
+    let default = CertificateSubject::default();
+    let Some(subject) = subject else {
+        return default;
+    };
+
+    CertificateSubject {
+        common_name: subject.cn.clone().unwrap_or(default.common_name),
+        country: subject.c.clone().unwrap_or(default.country),
+        state_or_province: subject.st.clone().unwrap_or(default.state_or_province),
+        locality: subject.l.clone().unwrap_or(default.locality),
+        organization: subject.o.clone().unwrap_or(default.organization),
+        organizational_unit: subject.ou.clone().unwrap_or(default.organizational_unit),
     }
 }
 
