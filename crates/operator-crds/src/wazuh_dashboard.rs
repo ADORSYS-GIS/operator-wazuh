@@ -1,8 +1,8 @@
 //! WazuhDashboard CRD definition
 
+use crate::WorkloadConfig;
 use crate::pod_template::PodTemplateSpecPatch;
 use crate::wazuh_ca::WazuhCARef;
-use crate::WorkloadConfig;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

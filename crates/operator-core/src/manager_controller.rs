@@ -1,6 +1,6 @@
 //! WazuhManagerCluster controller implementation
 
-use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
 use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
 use crate::tls::TlsManager;
@@ -11,10 +11,10 @@ use k8s_openapi::api::core::v1::{
     VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, ListParams, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::ResourceExt;
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::{
     ListenerServiceMode, WazuhIndexerCluster, WazuhListener, WazuhManager, WazuhManagerCluster,
 };

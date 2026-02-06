@@ -1,6 +1,6 @@
 //! WazuhIndexerCluster controller implementation
 
-use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
 use crate::cert_manager::Certificate;
 use crate::pod_template::apply_pod_template_patch;
 use crate::tls::TlsManager;
@@ -13,10 +13,10 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::ResourceExt;
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Duration;

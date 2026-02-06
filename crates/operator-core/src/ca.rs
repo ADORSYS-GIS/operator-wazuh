@@ -54,10 +54,7 @@ pub async fn resolve_default_wazuh_ca(
             ))
         })?;
         if list.items.len() == 1 {
-            list.items
-                .into_iter()
-                .next()
-                .expect("len checked to be 1")
+            list.items.into_iter().next().expect("len checked to be 1")
         } else {
             return Ok(None);
         }

@@ -6,9 +6,9 @@ use crate::pod_template::apply_pod_template_patch;
 use crate::volume_claim::{merge_volume_claims, pvc_from_template};
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetUpdateStrategy};
 use k8s_openapi::api::core::v1::{
-    Capabilities, ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, ObjectFieldSelector,
-    PodSecurityContext, PodSpec, PodTemplateSpec, Secret, SecretKeySelector, SecurityContext, Volume,
-    VolumeMount,
+    Capabilities, ConfigMap, Container, ContainerPort, EmptyDirVolumeSource, EnvVar, EnvVarSource,
+    KeyToPath, ObjectFieldSelector, PodSecurityContext, PodSpec, PodTemplateSpec, Secret,
+    SecretKeySelector, SecurityContext, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::ResourceExt;
@@ -807,6 +807,11 @@ fn generate_statefulset(
                 mount_path: "/wazuh-config-mount/etc/certs".to_string(),
                 ..Default::default()
             },
+            VolumeMount {
+                name: "api-ssl".to_string(),
+                mount_path: "/var/ossec/api/configuration/ssl".to_string(),
+                ..Default::default()
+            },
         ]),
         ..Default::default()
     }];
@@ -885,6 +890,36 @@ fn generate_statefulset(
             }),
             ..Default::default()
         },
+        Volume {
+            name: "api-tls".to_string(),
+            secret: Some(k8s_openapi::api::core::v1::SecretVolumeSource {
+                secret_name: Some(format!("{}-tls", cluster_name)),
+                items: Some(vec![
+                    KeyToPath {
+                        key: "tls.crt".to_string(),
+                        path: "server.crt".to_string(),
+                        ..Default::default()
+                    },
+                    KeyToPath {
+                        key: "tls.key".to_string(),
+                        path: "server.key".to_string(),
+                        ..Default::default()
+                    },
+                    KeyToPath {
+                        key: "ca.crt".to_string(),
+                        path: "ca.crt".to_string(),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        Volume {
+            name: "api-ssl".to_string(),
+            empty_dir: Some(EmptyDirVolumeSource::default()),
+            ..Default::default()
+        },
     ];
 
     if nginx_enabled {
@@ -944,7 +979,29 @@ fn generate_statefulset(
                             fs_group: Some(101),
                             ..Default::default()
                         }),
-                        init_containers: None,
+                        init_containers: Some(vec![Container {
+                            name: "init-api-ssl".to_string(),
+                            image: Some("busybox:1.36".to_string()),
+                            command: Some(vec![
+                                "/bin/sh".to_string(),
+                                "-c".to_string(),
+                                "cp -L /ssl-src/* /ssl-dst/ && chown -R 101:101 /ssl-dst && chmod 600 /ssl-dst/server.key && chmod 644 /ssl-dst/server.crt /ssl-dst/ca.crt".to_string(),
+                            ]),
+                            volume_mounts: Some(vec![
+                                VolumeMount {
+                                    name: "api-tls".to_string(),
+                                    mount_path: "/ssl-src".to_string(),
+                                    read_only: Some(true),
+                                    ..Default::default()
+                                },
+                                VolumeMount {
+                                    name: "api-ssl".to_string(),
+                                    mount_path: "/ssl-dst".to_string(),
+                                    ..Default::default()
+                                },
+                            ]),
+                            ..Default::default()
+                        }]),
                         containers,
                         volumes: Some(volumes),
                         ..Default::default()

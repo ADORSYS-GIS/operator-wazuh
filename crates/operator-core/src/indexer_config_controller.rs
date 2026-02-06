@@ -137,9 +137,8 @@ fn generate_configmap(
 
     data.insert(
         "nodes_dn.yml".to_string(),
-        serde_yaml::to_string(&default_nodes_dn_doc()).map_err(|e| {
-            Error::ValidationError(format!("Failed to render nodes_dn.yml: {}", e))
-        })?,
+        serde_yaml::to_string(&default_nodes_dn_doc())
+            .map_err(|e| Error::ValidationError(format!("Failed to render nodes_dn.yml: {}", e)))?,
     );
 
     if let Some(roles) = &config.spec.roles {
@@ -319,9 +318,7 @@ fn default_internal_users() -> BTreeMap<String, InternalUser> {
     users.insert(
         "admin".to_string(),
         InternalUser {
-            hash: Some(
-                "$2a$12$VcCDgh2NDk07JGN0rjGbM.Ad41qVR/YFJcgHp0UGns5JDymv..TOG".to_string(),
-            ),
+            hash: Some("$2a$12$VcCDgh2NDk07JGN0rjGbM.Ad41qVR/YFJcgHp0UGns5JDymv..TOG".to_string()),
             hash_secret_ref: None,
             reserved: Some(true),
             hidden: None,
@@ -333,9 +330,7 @@ fn default_internal_users() -> BTreeMap<String, InternalUser> {
     users.insert(
         "kibanaserver".to_string(),
         InternalUser {
-            hash: Some(
-                "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H.".to_string(),
-            ),
+            hash: Some("$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H.".to_string()),
             hash_secret_ref: None,
             reserved: Some(true),
             hidden: Some(false),

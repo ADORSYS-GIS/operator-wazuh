@@ -1,6 +1,6 @@
 //! WazuhDashboard controller implementation
 
-use crate::ca::{resolve_default_wazuh_ca, resolve_wazuh_ca, ResolvedCa};
+use crate::ca::{ResolvedCa, resolve_default_wazuh_ca, resolve_wazuh_ca};
 use crate::cert_manager::Certificate;
 use crate::error::{Error, Result};
 use crate::pod_template::apply_pod_template_patch;
@@ -11,10 +11,10 @@ use k8s_openapi::api::core::v1::{
     SecretKeySelector, Service, ServicePort, ServiceSpec, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use kube::ResourceExt;
 use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::runtime::controller::Action;
-use kube::runtime::finalizer::{finalizer, Event as FinalizerEvent};
-use kube::ResourceExt;
+use kube::runtime::finalizer::{Event as FinalizerEvent, finalizer};
 use operator_crds::{WazuhDashboard, WazuhIndexerCluster, WazuhManagerCluster};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -864,10 +864,7 @@ http {
     if let Some(url) = wazuh_api_url {
         data.insert(
             "wazuh.yml".to_string(),
-            format!(
-                "hosts:\n  - url: \"{}\"\n",
-                url
-            ),
+            format!("hosts:\n  - url: \"{}\"\n", url),
         );
     }
     data.insert(
