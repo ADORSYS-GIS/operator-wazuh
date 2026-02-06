@@ -1,0 +1,23 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhIndexerBackup
+metadata:
+  name: indexer-backup
+  namespace: wazuh-test
+spec:
+  wazuhIndexerClusterRef: wazuh-indexer
+  schedule: "*/10 * * * *"
+  storage:
+    pvc:
+      claimName: indexer-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: indexer-backup-pvc
+  namespace: wazuh-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

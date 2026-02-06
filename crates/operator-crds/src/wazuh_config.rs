@@ -1,0 +1,31 @@
+//! WazuhConfig CRD definition
+
+use kube::CustomResource;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
+#[kube(
+    group = "wazuh.adorsys.team",
+    version = "v1alpha1",
+    kind = "WazuhConfig",
+    plural = "wazuhconfigs",
+    namespaced,
+    status = "WazuhConfigStatus"
+)]
+pub struct WazuhConfigSpec {
+    /// XML content of the main configuration (ossec.conf)
+    pub content: String,
+    /// Selector to target specific manager nodes/clusters
+    pub node_selector: Option<std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
+pub struct WazuhConfigStatus {
+    /// Whether the configuration has been applied
+    pub applied: bool,
+    /// Error message if application failed
+    pub error: Option<String>,
+    /// Hash of the content
+    pub hash: Option<String>,
+}

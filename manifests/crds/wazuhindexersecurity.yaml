@@ -1,0 +1,90 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexersecurities.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerSecurity
+    plural: wazuhindexersecurities
+    shortNames: []
+    singular: wazuhindexersecurity
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerSecuritySpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              roles:
+                description: Role definitions
+                items:
+                  properties:
+                    cluster_permissions:
+                      items:
+                        type: string
+                      type: array
+                    index_permissions:
+                      items:
+                        properties:
+                          allowed_actions:
+                            items:
+                              type: string
+                            type: array
+                          index_patterns:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - allowed_actions
+                        - index_patterns
+                        type: object
+                      type: array
+                    name:
+                      type: string
+                  required:
+                  - cluster_permissions
+                  - index_permissions
+                  - name
+                  type: object
+                type: array
+              tenants:
+                description: Tenant definitions
+                items:
+                  properties:
+                    description:
+                      nullable: true
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+            required:
+            - roles
+            - tenants
+            type: object
+          status:
+            nullable: true
+            properties:
+              applied:
+                type: boolean
+              error:
+                nullable: true
+                type: string
+            required:
+            - applied
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerSecurity
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

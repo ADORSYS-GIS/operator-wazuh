@@ -1,0 +1,271 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wazuh-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-role
+rules:
+- apiGroups:
+  - wazuh.adorsys.team
+  resources:
+  - wazuhindexerclusters
+  - wazuhmanagerclusters
+  - wazuhmanagers
+  - wazuhdashboards
+  - wazuhcas
+  - wazuhindexerconfigs
+  - wazuhindexerbackups
+  - wazuhmanagerbackups
+  - wazuhlisteners
+  - wazuhrules
+  - wazuhdecoders
+  - wazuhconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - wazuh.adorsys.team
+  resources:
+  - wazuhindexerclusters/status
+  - wazuhmanagerclusters/status
+  - wazuhmanagers/status
+  - wazuhdashboards/status
+  - wazuhcas/status
+  - wazuhindexerconfigs/status
+  - wazuhindexerbackups/status
+  - wazuhmanagerbackups/status
+  - wazuhlisteners/status
+  - wazuhrules/status
+  - wazuhdecoders/status
+  - wazuhconfigs/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  - pods
+  - configmaps
+  - secrets
+  - persistentvolumeclaims
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificates/status
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-secrets-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - configmaps
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-services-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wazuh-operator-statefulsets-role
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets/status
+  verbs:
+  - get
+  - update
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-secrets-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-secrets-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-services-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-services-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wazuh-operator-statefulsets-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wazuh-operator-statefulsets-role
+subjects:
+- kind: ServiceAccount
+  name: wazuh-operator
+  namespace: wazuh-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wazuh-operator
+  namespace: wazuh-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wazuh-operator
+  template:
+    metadata:
+      labels:
+        app: wazuh-operator
+    spec:
+      containers:
+      - command:
+        - /usr/local/bin/wazuh-operator
+        - run
+        - --namespace
+        - all
+        env:
+        - name: RUST_LOG
+          value: info
+        - name: LOG_FORMAT
+          value: json
+        image: wazuh-operator:latest
+        imagePullPolicy: IfNotPresent
+        name: operator
+      serviceAccountName: wazuh-operator

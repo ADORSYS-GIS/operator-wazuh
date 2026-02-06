@@ -1,0 +1,115 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerconfigs.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerConfig
+    plural: wazuhindexerconfigs
+    shortNames: []
+    singular: wazuhindexerconfig
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerConfigSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              action_groups:
+                additionalProperties: true
+                nullable: true
+                type: object
+              internal_users:
+                additionalProperties:
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      nullable: true
+                      type: object
+                    backend_roles:
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
+                    description:
+                      nullable: true
+                      type: string
+                    hash:
+                      nullable: true
+                      type: string
+                    hashSecretRef:
+                      nullable: true
+                      properties:
+                        key:
+                          nullable: true
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    hidden:
+                      nullable: true
+                      type: boolean
+                    reserved:
+                      nullable: true
+                      type: boolean
+                  type: object
+                nullable: true
+                type: object
+              roles:
+                additionalProperties: true
+                nullable: true
+                type: object
+              roles_mapping:
+                additionalProperties: true
+                nullable: true
+                type: object
+              schedule:
+                nullable: true
+                type: string
+              tenants:
+                additionalProperties: true
+                nullable: true
+                type: object
+              wazuhIndexerClusterRef:
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - wazuhIndexerClusterRef
+            type: object
+          status:
+            nullable: true
+            properties:
+              error:
+                nullable: true
+                type: string
+              last_applied_hash:
+                nullable: true
+                type: string
+              observed_generation:
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerConfig
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

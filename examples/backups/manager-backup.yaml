@@ -1,0 +1,23 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhManagerBackup
+metadata:
+  name: manager-backup
+  namespace: wazuh-test
+spec:
+  wazuhManagerClusterRef: wazuh-manager
+  schedule: "*/10 * * * *"
+  storage:
+    pvc:
+      claimName: manager-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: manager-backup-pvc
+  namespace: wazuh-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

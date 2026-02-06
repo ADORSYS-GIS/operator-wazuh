@@ -1,0 +1,222 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhindexerclusters.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhIndexerCluster
+    plural: wazuhindexerclusters
+    shortNames: []
+    singular: wazuhindexercluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhIndexerClusterSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              disableDefaultPvc:
+                description: Disable default PVC templates
+                nullable: true
+                type: boolean
+              podTemplate:
+                description: Pod template overrides
+                nullable: true
+                properties:
+                  metadata:
+                    nullable: true
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                    type: object
+                  spec:
+                    nullable: true
+                    properties:
+                      affinity:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
+                      dns_policy:
+                        nullable: true
+                        type: string
+                      host_network:
+                        nullable: true
+                        type: boolean
+                      image_pull_secrets:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
+                      node_selector:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      priority_class_name:
+                        nullable: true
+                        type: string
+                      security_context:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
+                      service_account_name:
+                        nullable: true
+                        type: string
+                      tolerations:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
+                    type: object
+                type: object
+              replicas:
+                description: Number of indexer nodes
+                format: int32
+                type: integer
+              resources:
+                description: Resource requirements for indexer containers
+                nullable: true
+                properties:
+                  limits:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                  requests:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                type: object
+              storage:
+                description: Storage configuration
+                properties:
+                  size:
+                    description: Storage size (e.g., "10Gi")
+                    type: string
+                  storage_class:
+                    description: Storage class
+                    nullable: true
+                    type: string
+                required:
+                - size
+                type: object
+              tls:
+                description: TLS configuration
+                nullable: true
+                properties:
+                  ca_ref:
+                    description: Reference to shared WazuhCA
+                    nullable: true
+                    properties:
+                      name:
+                        description: Name of the WazuhCA resource
+                        type: string
+                      namespace:
+                        description: Namespace of the WazuhCA resource (defaults to the cluster namespace)
+                        nullable: true
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  cert_secret:
+                    description: TLS certificate secret
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable TLS
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              version:
+                description: Wazuh indexer version
+                type: string
+              volumeClaimTemplates:
+                description: Additional volume claim templates
+                items:
+                  properties:
+                    metadata:
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        labels:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    spec:
+                      additionalProperties: true
+                      description: PVC spec (PersistentVolumeClaimSpec)
+                      type: object
+                  required:
+                  - metadata
+                  - spec
+                  type: object
+                nullable: true
+                type: array
+              workload:
+                description: Workload configuration
+                nullable: true
+                properties:
+                  name:
+                    description: Override workload name (used for StatefulSet/Deployment name and pod name prefix)
+                    nullable: true
+                    type: string
+                type: object
+            required:
+            - replicas
+            - storage
+            - version
+            type: object
+          status:
+            nullable: true
+            properties:
+              endpoints:
+                description: Cluster endpoints
+                items:
+                  type: string
+                type: array
+              phase:
+                description: Current status of the cluster
+                type: string
+              ready_nodes:
+                description: Number of ready nodes
+                format: int32
+                type: integer
+            required:
+            - endpoints
+            - phase
+            - ready_nodes
+            type: object
+        required:
+        - spec
+        title: WazuhIndexerCluster
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

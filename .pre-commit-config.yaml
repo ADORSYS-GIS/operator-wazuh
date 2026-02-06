@@ -1,0 +1,32 @@
+# .pre-commit-config.yaml
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+    -   id: check-yaml
+        exclude: charts
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+-   repo: local
+    hooks:
+    -   id: cargo-check
+        name: cargo check
+        description: Check the package for errors.
+        entry: cargo check --all-targets --all-features
+        language: rust
+        types: [rust]
+        pass_filenames: false
+    -   id: cargo-fmt
+        name: cargo fmt
+        description: Format files with rustfmt.
+        entry: cargo fmt
+        language: rust
+        types: [rust]
+        pass_filenames: false
+    -   id: cargo-clippy
+        name: cargo clippy
+        description: Lint files with clippy.
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: rust
+        types: [rust]
+        pass_filenames: false

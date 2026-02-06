@@ -1,0 +1,120 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhlisteners.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhListener
+    plural: wazuhlisteners
+    shortNames: []
+    singular: wazuhlistener
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhListenerSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              manager_cluster:
+                description: Reference to manager cluster
+                nullable: true
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              node_selector:
+                additionalProperties:
+                  type: string
+                description: Selector to target specific manager nodes/clusters
+                nullable: true
+                type: object
+              port:
+                description: Port number to expose
+                format: int32
+                type: integer
+              protocol:
+                description: Protocol (TCP or UDP)
+                type: string
+              selectors:
+                description: Multiple selectors (OR). Any matching selector applies.
+                items:
+                  additionalProperties:
+                    type: string
+                  type: object
+                nullable: true
+                type: array
+              service:
+                description: Service configuration
+                nullable: true
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: Extra service annotations
+                    nullable: true
+                    type: object
+                  headless:
+                    description: Create a headless service when true
+                    nullable: true
+                    type: boolean
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: Extra service labels
+                    nullable: true
+                    type: object
+                  mode:
+                    description: How to expose the listener (attach to cluster service, or create a dedicated service)
+                    enum:
+                    - attach
+                    - create
+                    nullable: true
+                    type: string
+                  service_type:
+                    description: Service type (ClusterIP, NodePort, LoadBalancer)
+                    nullable: true
+                    type: string
+                type: object
+            required:
+            - port
+            - protocol
+            type: object
+          status:
+            nullable: true
+            properties:
+              ready:
+                description: Whether the listener is ready
+                type: boolean
+              service_name:
+                description: Service name created for the listener
+                nullable: true
+                type: string
+              service_names:
+                description: Service names created for the listener (when multiple selectors are used)
+                items:
+                  type: string
+                nullable: true
+                type: array
+            required:
+            - ready
+            type: object
+        required:
+        - spec
+        title: WazuhListener
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

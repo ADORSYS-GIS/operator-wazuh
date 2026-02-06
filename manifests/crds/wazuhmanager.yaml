@@ -1,0 +1,216 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: wazuhmanagers.wazuh.adorsys.team
+spec:
+  group: wazuh.adorsys.team
+  names:
+    categories: []
+    kind: WazuhManager
+    plural: wazuhmanagers
+    shortNames: []
+    singular: wazuhmanager
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WazuhManagerSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              apiSecretRef:
+                description: Secret reference for manager API credentials
+                nullable: true
+                properties:
+                  name:
+                    description: Secret name in the same namespace
+                    type: string
+                required:
+                - name
+                type: object
+              cluster_ref:
+                description: Reference to the WazuhManagerCluster
+                properties:
+                  name:
+                    description: Name of the manager cluster
+                    type: string
+                  namespace:
+                    description: Namespace of the manager cluster
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              disableDefaultPvc:
+                description: Disable default PVC templates
+                nullable: true
+                type: boolean
+              nginx:
+                description: Nginx sidecar configuration
+                nullable: true
+                properties:
+                  custom_config:
+                    description: Custom nginx.conf content
+                    nullable: true
+                    type: string
+                  enabled:
+                    description: Enable Nginx sidecar
+                    type: boolean
+                  image:
+                    description: Nginx container image config
+                    nullable: true
+                    properties:
+                      pull_policy:
+                        description: Image pull policy
+                        nullable: true
+                        type: string
+                      repository:
+                        description: Image repository (e.g. nginx)
+                        type: string
+                      tag:
+                        description: Image tag (e.g. stable-alpine)
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
+                required:
+                - enabled
+                type: object
+              podTemplate:
+                description: Pod template overrides
+                nullable: true
+                properties:
+                  metadata:
+                    nullable: true
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                    type: object
+                  spec:
+                    nullable: true
+                    properties:
+                      affinity:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
+                      dns_policy:
+                        nullable: true
+                        type: string
+                      host_network:
+                        nullable: true
+                        type: boolean
+                      image_pull_secrets:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
+                      node_selector:
+                        additionalProperties:
+                          type: string
+                        nullable: true
+                        type: object
+                      priority_class_name:
+                        nullable: true
+                        type: string
+                      security_context:
+                        additionalProperties: true
+                        nullable: true
+                        type: object
+                      service_account_name:
+                        nullable: true
+                        type: string
+                      tolerations:
+                        items:
+                          additionalProperties: true
+                          type: object
+                        nullable: true
+                        type: array
+                    type: object
+                type: object
+              replicas:
+                description: Number of manager nodes in this workload group
+                format: int32
+                type: integer
+              role:
+                description: Node role (master or worker)
+                enum:
+                - master
+                - worker
+                type: string
+              volumeClaimTemplates:
+                description: Additional volume claim templates
+                items:
+                  properties:
+                    metadata:
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        labels:
+                          additionalProperties:
+                            type: string
+                          nullable: true
+                          type: object
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    spec:
+                      additionalProperties: true
+                      description: PVC spec (PersistentVolumeClaimSpec)
+                      type: object
+                  required:
+                  - metadata
+                  - spec
+                  type: object
+                nullable: true
+                type: array
+              workload:
+                description: Workload configuration
+                nullable: true
+                properties:
+                  name:
+                    description: Override workload name (used for StatefulSet/Deployment name and pod name prefix)
+                    nullable: true
+                    type: string
+                type: object
+            required:
+            - cluster_ref
+            - replicas
+            - role
+            type: object
+          status:
+            nullable: true
+            properties:
+              phase:
+                nullable: true
+                type: string
+              ready_replicas:
+                format: int32
+                type: integer
+            required:
+            - ready_replicas
+            type: object
+        required:
+        - spec
+        title: WazuhManager
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

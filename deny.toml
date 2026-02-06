@@ -1,0 +1,19 @@
+[licenses]
+unused-allowed-license = "warn"
+confidence-threshold = 0.95
+allow = [
+    "ISC",
+    "Unicode-3.0",
+    "MIT",
+    "Apache-2.0",
+    "EUPL-1.2",
+    "BSD-3-Clause",
+]
+
+[advisories]
+ignore = [
+    # failure is not maintained, but it's ok... for now
+    # TODO replace => failure
+    "RUSTSEC-2020-0036",
+    "RUSTSEC-2019-0036",
+]

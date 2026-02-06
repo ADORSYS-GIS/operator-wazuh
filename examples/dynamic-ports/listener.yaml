@@ -1,0 +1,12 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhListener
+metadata:
+  name: custom-syslog-listener
+  namespace: wazuh-test
+spec:
+  port: 514
+  protocol: udp
+  manager_cluster:
+    name: wazuh-manager
+  service:
+    mode: attach

@@ -1,0 +1,14 @@
+target
+.git
+.idea
+.roo
+debug
+**/*.log
+.gitignore
+manifests
+examples
+wazuh-operator-install.yaml
+*.md
+.pre-commit-config.yaml
+.gitignore
+deny.toml

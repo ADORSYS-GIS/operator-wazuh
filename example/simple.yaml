@@ -1,7 +1,0 @@
-apiVersion: wazuh.adorsys.team/v1
-kind: WazuhCluster
-metadata:
-  name: wazuh-cluster-sample
-  namespace: my-namespace
-spec:
-  replicas: 3

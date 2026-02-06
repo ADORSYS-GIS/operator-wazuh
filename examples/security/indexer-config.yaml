@@ -1,0 +1,36 @@
+apiVersion: wazuh.adorsys.team/v1alpha1
+kind: WazuhIndexerConfig
+metadata:
+  name: wazuh-indexer-config
+  namespace: wazuh-test
+spec:
+  wazuhIndexerClusterRef:
+    name: wazuh-indexer
+  schedule: "*/10 * * * *"
+  internal_users:
+    kibanaserver:
+      hashSecretRef:
+        name: kibanaserver-hash
+      reserved: true
+      hidden: false
+      description: "Demo kibanaserver user"
+    newuser:
+      hashSecretRef:
+        name: newuser-hash
+      description: "A new test user"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kibanaserver-hash
+  namespace: wazuh-test
+stringData:
+  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: newuser-hash
+  namespace: wazuh-test
+stringData:
+  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
